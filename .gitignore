@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.gemini/
+.DS_Store
+*.js
+*.d.ts
+*.js.map
+*.d.ts.map
+!src/**
