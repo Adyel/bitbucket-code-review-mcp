@@ -1,0 +1,50 @@
+{
+  "name": "bitbucket-code-review-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for posting code review comments on Bitbucket Cloud pull requests",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "bitbucket-code-review-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "bitbucket",
+    "code-review",
+    "pull-request",
+    "model-context-protocol",
+    "ai-review",
+    "gemini-cli"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Adyel/bitbucket-code-review-mcp.git"
+  },
+  "homepage": "https://github.com/Adyel/bitbucket-code-review-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Adyel/bitbucket-code-review-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  }
+}
