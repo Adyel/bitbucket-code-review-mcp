@@ -13,6 +13,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 | **Code Suggestions** | Use Bitbucket's `/suggest` syntax — one-click apply for PR authors |
 | **File & General Comments** | File-level and PR-wide comments |
 | **Comment Management** | Reply, update (with marker), delete (AI-only guard), resolve/reopen |
+| **Pending Comments** | Create comments as draft — not published until reviewer submits review |
 | **Tasks** | Create, list, update tasks on PRs |
 | **Bulk Operations** | Post multiple inline comments in one call |
 
@@ -50,11 +51,21 @@ export BITBUCKET_EMAIL="your-atlassian-email@example.com"
 export BITBUCKET_API_TOKEN="your-api-token"
 
 # Optional defaults (avoids specifying in every tool call)
+# These values come from your Bitbucket repo URL:
+#   https://bitbucket.org/{workspace}/{repo_slug}
+# e.g. https://bitbucket.org/acme-corp/backend-api
+#   → BITBUCKET_DEFAULT_WORKSPACE=acme-corp
+#   → BITBUCKET_DEFAULT_REPO_SLUG=backend-api
 export BITBUCKET_DEFAULT_WORKSPACE="your-workspace"
 export BITBUCKET_DEFAULT_REPO_SLUG="your-repo"
 
 # Optional: customize the AI review tag (default: 🤖 AI Review)
+# Set to empty string to disable tagging entirely: BITBUCKET_AI_TAG=""
 export BITBUCKET_AI_TAG="🤖 AI Review"
+
+# Optional: create comments as pending/draft (default: false)
+# When true, comments are not published until the reviewer submits the review
+export BITBUCKET_COMMENTS_PENDING=false
 ```
 
 ## 🔌 Agent Configuration
@@ -144,7 +155,8 @@ Add to `~/.gemini/settings.json`:
 
 - **Delete protection**: `delete_comment` fetches the comment first and checks for the `[AI Review]` tag. Human comments cannot be deleted through this MCP.
 - **Update traceability**: `update_comment` works on any comment (AI or human) but always appends an `[✏️ Updated by AI]` marker so every change is traceable.
-- **Configurable tags**: Set `BITBUCKET_AI_TAG` env var to customize the tag used for identification.
+- **Configurable tags**: Set `BITBUCKET_AI_TAG` env var to customize the tag, or set to `""` to disable tagging entirely.
+- **Pending comments**: Set `BITBUCKET_COMMENTS_PENDING=true` to create comments as drafts that are only published when the reviewer submits the review.
 
 ## 🎨 Comment Formatting
 
