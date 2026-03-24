@@ -55,8 +55,27 @@ function validateEnv() {
 
 // ─── Main ────────────────────────────────────────────────────
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+function getVersion(): string {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const pkg = JSON.parse(
+    readFileSync(join(__dirname, "..", "package.json"), "utf-8")
+  );
+  return pkg.version;
+}
+
 async function main(): Promise<void> {
+  // Handle --version / -v flag
+  if (process.argv.includes("--version") || process.argv.includes("-v")) {
+    console.log(getVersion());
+    process.exit(0);
+  }
+
   const env = validateEnv();
+  const version = getVersion();
 
   // Initialize Bitbucket client
   const client = new BitbucketClient({
@@ -70,7 +89,7 @@ async function main(): Promise<void> {
   // Create MCP server
   const server = new McpServer({
     name: "bitbucket-code-review",
-    version: "1.0.0",
+    version,
   });
 
   // Register all tools

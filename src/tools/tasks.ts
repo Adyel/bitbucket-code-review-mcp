@@ -64,8 +64,8 @@ export function registerTasks(
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, pr_id }) => {
-      const result = await client.listPRTasks(pr_id, workspace, repo_slug);
-      const tasks = result.values.map((t) => ({
+      const allTasks = await client.listPRTasks(pr_id, workspace, repo_slug);
+      const tasks = allTasks.map((t) => ({
         id: t.id,
         content: t.content.raw,
         state: t.state,

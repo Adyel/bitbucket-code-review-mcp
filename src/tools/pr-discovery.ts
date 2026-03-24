@@ -35,12 +35,12 @@ export function registerPRDiscovery(
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, state }) => {
-      const result = await client.listPullRequests(
+      const prs = await client.listPullRequests(
         workspace,
         repo_slug,
         state || "OPEN"
       );
-      const prs = result.values.map((pr) => ({
+      const mapped = prs.map((pr) => ({
         id: pr.id,
         title: pr.title,
         state: pr.state,
@@ -50,7 +50,7 @@ export function registerPRDiscovery(
         url: pr.links.html.href,
         created: pr.created_on,
       }));
-      return toolResponse({ pull_requests: prs });
+      return toolResponse({ pull_requests: mapped });
     })
   );
 
@@ -96,12 +96,12 @@ export function registerPRDiscovery(
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, branch_name }) => {
-      const result = await client.getPullRequestByBranch(
+      const prs = await client.getPullRequestByBranch(
         branch_name,
         workspace,
         repo_slug
       );
-      const prs = result.values.map((pr) => ({
+      const mapped = prs.map((pr) => ({
         id: pr.id,
         title: pr.title,
         state: pr.state,
@@ -111,12 +111,12 @@ export function registerPRDiscovery(
         url: pr.links.html.href,
       }));
 
-      if (prs.length === 0) {
+      if (mapped.length === 0) {
         return toolTextResponse(
           `No pull requests found for branch "${branch_name}".`
         );
       }
-      return toolResponse({ pull_requests: prs });
+      return toolResponse({ pull_requests: mapped });
     })
   );
 
@@ -189,8 +189,8 @@ export function registerPRDiscovery(
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, pr_id }) => {
-      const result = await client.listPRChanges(pr_id, workspace, repo_slug);
-      const files = result.values.map((entry) => ({
+      const entries = await client.listPRChanges(pr_id, workspace, repo_slug);
+      const files = entries.map((entry) => ({
         status: entry.status,
         old_path: entry.old?.path,
         new_path: entry.new?.path,

@@ -1,9 +1,12 @@
 /**
  * Bitbucket Cloud REST API v2.0 client.
- * Handles authentication and all PR comment/task/diff operations.
+ * Handles authentication, pagination, retry logic,
+ * and all PR comment/task/diff operations.
  */
 
 const BASE_URL = "https://api.bitbucket.org/2.0";
+const MAX_RETRIES = 3;
+const INITIAL_BACKOFF_MS = 1000;
 
 export interface BitbucketConfig {
   email: string;
@@ -97,42 +100,89 @@ export class BitbucketClient {
 
   private async request<T>(
     method: string,
-    path: string,
+    pathOrUrl: string,
     body?: unknown
   ): Promise<T> {
-    const url = `${BASE_URL}${path}`;
+    const url = pathOrUrl.startsWith("http")
+      ? pathOrUrl
+      : `${BASE_URL}${pathOrUrl}`;
     const headers: Record<string, string> = {
       Authorization: this.authHeader,
       "Content-Type": "application/json",
       Accept: "application/json",
     };
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let lastError: Error | null = null;
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(
-        `Bitbucket API error ${response.status} ${response.statusText}: ${errorBody}`
-      );
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      // Retry on 429 (rate limit) or 5xx (server error)
+      if (
+        (response.status === 429 || response.status >= 500) &&
+        attempt < MAX_RETRIES
+      ) {
+        const retryAfter = response.headers.get("retry-after");
+        if (retryAfter) {
+          const waitMs = parseInt(retryAfter, 10) * 1000;
+          if (!isNaN(waitMs)) {
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+          }
+        }
+        lastError = new Error(
+          `Bitbucket API error ${response.status} ${response.statusText}`
+        );
+        continue;
+      }
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          `Bitbucket API error ${response.status} ${response.statusText}: ${errorBody}`
+        );
+      }
+
+      // Some endpoints return no content (204)
+      if (response.status === 204) {
+        return {} as T;
+      }
+
+      // Check if the response has a body
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        return (await response.json()) as T;
+      }
+
+      // For text responses (like diff)
+      return (await response.text()) as unknown as T;
     }
 
-    // Some endpoints return no content (204)
-    if (response.status === 204) {
-      return {} as T;
+    throw lastError ?? new Error("Request failed after retries");
+  }
+
+  /**
+   * Fetch all pages of a paginated endpoint, following `next` URLs.
+   */
+  private async fetchAllPages<T>(path: string): Promise<T[]> {
+    const allValues: T[] = [];
+    let currentUrl: string | undefined = `${BASE_URL}${path}`;
+
+    while (currentUrl) {
+      const page: PaginatedResponse<T> = await this.request<PaginatedResponse<T>>("GET", currentUrl);
+      allValues.push(...page.values);
+      currentUrl = page.next;
     }
 
-    // Check if the response has a body
-    const contentType = response.headers.get("content-type");
-    if (contentType && contentType.includes("application/json")) {
-      return (await response.json()) as T;
-    }
-
-    // For text responses (like diff)
-    return (await response.text()) as unknown as T;
+    return allValues;
   }
 
   private resolveWorkspace(workspace?: string): string {
@@ -191,12 +241,11 @@ export class BitbucketClient {
     workspace?: string,
     repoSlug?: string,
     state?: string
-  ): Promise<PaginatedResponse<PullRequest>> {
+  ): Promise<PullRequest[]> {
     const ws = this.resolveWorkspace(workspace);
     const slug = this.resolveRepoSlug(repoSlug);
     const query = state ? `?state=${encodeURIComponent(state)}` : "";
-    return this.request<PaginatedResponse<PullRequest>>(
-      "GET",
+    return this.fetchAllPages<PullRequest>(
       `/repositories/${ws}/${slug}/pullrequests${query}`
     );
   }
@@ -218,12 +267,11 @@ export class BitbucketClient {
     branchName: string,
     workspace?: string,
     repoSlug?: string
-  ): Promise<PaginatedResponse<PullRequest>> {
+  ): Promise<PullRequest[]> {
     const ws = this.resolveWorkspace(workspace);
     const slug = this.resolveRepoSlug(repoSlug);
     const query = `?q=source.branch.name="${encodeURIComponent(branchName)}"`;
-    return this.request<PaginatedResponse<PullRequest>>(
-      "GET",
+    return this.fetchAllPages<PullRequest>(
       `/repositories/${ws}/${slug}/pullrequests${query}`
     );
   }
@@ -247,11 +295,10 @@ export class BitbucketClient {
     prId: number,
     workspace?: string,
     repoSlug?: string
-  ): Promise<PaginatedResponse<DiffStatEntry>> {
+  ): Promise<DiffStatEntry[]> {
     const ws = this.resolveWorkspace(workspace);
     const slug = this.resolveRepoSlug(repoSlug);
-    return this.request<PaginatedResponse<DiffStatEntry>>(
-      "GET",
+    return this.fetchAllPages<DiffStatEntry>(
       `/repositories/${ws}/${slug}/pullrequests/${prId}/diffstat`
     );
   }
@@ -262,11 +309,10 @@ export class BitbucketClient {
     prId: number,
     workspace?: string,
     repoSlug?: string
-  ): Promise<PaginatedResponse<PRComment>> {
+  ): Promise<PRComment[]> {
     const ws = this.resolveWorkspace(workspace);
     const slug = this.resolveRepoSlug(repoSlug);
-    return this.request<PaginatedResponse<PRComment>>(
-      "GET",
+    return this.fetchAllPages<PRComment>(
       `/repositories/${ws}/${slug}/pullrequests/${prId}/comments`
     );
   }
@@ -384,11 +430,10 @@ export class BitbucketClient {
     prId: number,
     workspace?: string,
     repoSlug?: string
-  ): Promise<PaginatedResponse<PRTask>> {
+  ): Promise<PRTask[]> {
     const ws = this.resolveWorkspace(workspace);
     const slug = this.resolveRepoSlug(repoSlug);
-    return this.request<PaginatedResponse<PRTask>>(
-      "GET",
+    return this.fetchAllPages<PRTask>(
       `/repositories/${ws}/${slug}/pullrequests/${prId}/tasks`
     );
   }
