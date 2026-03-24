@@ -4,6 +4,7 @@ dist/
 .gemini/
 .DS_Store
 *.js
+!eslint.config.js
 *.d.ts
 *.js.map
 *.d.ts.map
