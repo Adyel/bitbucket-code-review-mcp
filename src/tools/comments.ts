@@ -126,6 +126,14 @@ export function registerComments(
           .int()
           .positive()
           .describe("Line number in the new version of the file."),
+        end_line: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Optional end line for multi-line suggestions. When set, the suggestion spans from 'line' to 'end_line'."
+          ),
         suggested_code: z
           .string()
           .describe(
@@ -144,14 +152,23 @@ export function registerComments(
         pr_id,
         file_path,
         line,
+        end_line,
         suggested_code,
         explanation,
       }) => {
         const formatted = formatCodeSuggestion(suggested_code, explanation);
+        const inlinePos: { path: string; to: number; from?: number } = {
+          path: file_path,
+          to: line,
+        };
+        if (end_line) {
+          inlinePos.from = line;
+          inlinePos.to = end_line;
+        }
         const result = await client.createPRComment(
           pr_id,
           formatted,
-          { path: file_path, to: line },
+          inlinePos,
           undefined,
           workspace,
           repo_slug
@@ -340,8 +357,8 @@ export function registerComments(
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, pr_id }) => {
-      const result = await client.listPRComments(pr_id, workspace, repo_slug);
-      const comments = result.values
+      const allComments = await client.listPRComments(pr_id, workspace, repo_slug);
+      const comments = allComments
         .filter((c) => !c.deleted)
         .map((c) => ({
           id: c.id,
