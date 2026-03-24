@@ -10,7 +10,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 |----------|-------|
 | **PR Discovery** | List PRs, get by ID/branch/URL, view diff, list changed files, read file content |
 | **Inline Comments** | Post on specific lines with severity emojis (💡⚠️🐛📝🔒) |
-| **Code Suggestions** | Use Bitbucket's `/suggest` syntax — one-click apply for PR authors |
+| **Code Suggestions** | Single and multi-line suggestions with Bitbucket's `/suggest` syntax — one-click apply |
 | **File & General Comments** | File-level and PR-wide comments |
 | **Comment Management** | Reply, update (with marker), delete (AI-only guard), resolve/reopen |
 | **Pending Comments** | Create comments as draft — not published until reviewer submits review |
@@ -134,7 +134,7 @@ Add to `~/.gemini/settings.json`:
 |------|-------------|
 | `add_general_comment` | Post PR-level comment |
 | `add_inline_comment` | Post on a specific file:line with optional severity |
-| `add_inline_suggestion` | Post a code suggestion (one-click apply in Bitbucket) |
+| `add_inline_suggestion` | Post a code suggestion with optional `end_line` for multi-line spans |
 | `add_file_level_comment` | Post file-level comment |
 | `reply_to_comment` | Reply to a comment thread |
 | `update_comment` | Update any comment with additional context (appends `[✏️ Updated by AI]`) |
@@ -158,6 +158,11 @@ Add to `~/.gemini/settings.json`:
 - **Update traceability**: `update_comment` works on any comment (AI or human) but always appends an `[✏️ Updated by AI]` marker so every change is traceable.
 - **Configurable tags**: Set `BITBUCKET_AI_TAG` env var to customize the tag, or set to `""` to disable tagging entirely.
 - **Pending comments**: Set `BITBUCKET_COMMENTS_PENDING=true` to create comments as drafts that are only published when the reviewer submits the review.
+
+## 🔄 Resilience & Pagination
+
+- **Automatic pagination**: All list endpoints (`list_pull_requests`, `list_comments`, `list_pull_request_files`, `list_tasks`) automatically follow Bitbucket's `next` URLs to return complete results, even for large PRs.
+- **Retry with backoff**: API requests automatically retry on HTTP 429 (rate limit) and 5xx (server errors) with exponential backoff, respecting `Retry-After` headers.
 
 ## 🎨 Comment Formatting
 
@@ -189,8 +194,8 @@ const name = user?.name ?? 'default';
 
 ```
 src/
-├── index.ts               # MCP server entry point (Zod env validation)
-├── bitbucket-client.ts    # Bitbucket Cloud REST API client
+├── index.ts               # Entry point (Zod env validation, --version)
+├── bitbucket-client.ts    # API client (auth, pagination, retry)
 ├── comment-formatter.ts   # Comment formatting & AI tag guards
 ├── schemas/
 │   └── shared.ts          # Shared Zod input schemas
@@ -202,6 +207,16 @@ src/
     ├── comments.ts         # Inline, file-level, general comments
     ├── tasks.ts            # Task create/list/update
     └── bulk.ts             # Batch inline comments
+```
+
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, adding tools, and the release process.
+
+## CLI
+
+```bash
+node dist/index.js --version   # Print version and exit
 ```
 
 ## License
