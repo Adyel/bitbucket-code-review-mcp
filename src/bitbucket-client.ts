@@ -86,16 +86,13 @@ export interface PaginatedResponse<T> {
 
 export class BitbucketClient {
   private config: BitbucketConfig;
+  private readonly authHeader: string;
 
   constructor(config: BitbucketConfig) {
     this.config = config;
-  }
-
-  private getAuthHeader(): string {
-    const credentials = Buffer.from(
-      `${this.config.email}:${this.config.apiToken}`
-    ).toString("base64");
-    return `Basic ${credentials}`;
+    this.authHeader = `Basic ${Buffer.from(
+      `${config.email}:${config.apiToken}`
+    ).toString("base64")}`;
   }
 
   private async request<T>(
@@ -105,7 +102,7 @@ export class BitbucketClient {
   ): Promise<T> {
     const url = `${BASE_URL}${path}`;
     const headers: Record<string, string> = {
-      Authorization: this.getAuthHeader(),
+      Authorization: this.authHeader,
       "Content-Type": "application/json",
       Accept: "application/json",
     };
@@ -431,6 +428,22 @@ export class BitbucketClient {
       "PUT",
       `/repositories/${ws}/${slug}/pullrequests/${prId}/tasks/${taskId}`,
       { state }
+    );
+  }
+
+  // ─── Source / File Content ──────────────────────────────────
+
+  async getFileContent(
+    commit: string,
+    filePath: string,
+    workspace?: string,
+    repoSlug?: string
+  ): Promise<string> {
+    const ws = this.resolveWorkspace(workspace);
+    const slug = this.resolveRepoSlug(repoSlug);
+    return this.request<string>(
+      "GET",
+      `/repositories/${ws}/${slug}/src/${encodeURIComponent(commit)}/${filePath}`
     );
   }
 }

@@ -8,7 +8,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 | Category | Tools |
 |----------|-------|
-| **PR Discovery** | List PRs, get by ID/branch/URL, view diff, list changed files |
+| **PR Discovery** | List PRs, get by ID/branch/URL, view diff, list changed files, read file content |
 | **Inline Comments** | Post on specific lines with severity emojis (💡⚠️🐛📝🔒) |
 | **Code Suggestions** | Use Bitbucket's `/suggest` syntax — one-click apply for PR authors |
 | **File & General Comments** | File-level and PR-wide comments |
@@ -126,6 +126,7 @@ Add to `~/.gemini/settings.json`:
 | `get_pull_request_from_url` | Parse a Bitbucket PR URL → get details |
 | `get_pull_request_diff` | Get full diff text |
 | `list_pull_request_files` | List changed files with add/remove counts |
+| `get_file_content` | Read file content at a specific commit/branch/tag |
 
 ### Code Review Comments
 
@@ -188,10 +189,19 @@ const name = user?.name ?? 'default';
 
 ```
 src/
-├── index.ts              # MCP server entry point
-├── bitbucket-client.ts   # Bitbucket Cloud REST API client
-├── tools.ts              # MCP tool definitions (Zod schemas)
-└── comment-formatter.ts  # Comment formatting & AI tag guards
+├── index.ts               # MCP server entry point (Zod env validation)
+├── bitbucket-client.ts    # Bitbucket Cloud REST API client
+├── comment-formatter.ts   # Comment formatting & AI tag guards
+├── schemas/
+│   └── shared.ts          # Shared Zod input schemas
+├── utils/
+│   └── response.ts        # Response helpers & error handling
+└── tools/
+    ├── index.ts            # Tool registration entry point
+    ├── pr-discovery.ts     # PR listing, diff, file content tools
+    ├── comments.ts         # Inline, file-level, general comments
+    ├── tasks.ts            # Task create/list/update
+    └── bulk.ts             # Batch inline comments
 ```
 
 ## License
