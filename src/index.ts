@@ -9,48 +9,48 @@
  *
  * The server does NOT review code itself — it provides tools for agents to
  * create comments tagged with [AI Review] for human review.
- *
- * Environment Variables:
- *   BITBUCKET_EMAIL             - Required: Atlassian account email
- *   BITBUCKET_API_TOKEN         - Required: Bitbucket API token
- *   BITBUCKET_DEFAULT_WORKSPACE - Optional: Default workspace slug
- *   BITBUCKET_DEFAULT_REPO_SLUG - Optional: Default repository slug
- *   BITBUCKET_AI_TAG            - Optional: Custom AI tag (default: 🤖 AI Review)
  */
 
+import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { BitbucketClient } from "./bitbucket-client.js";
-import { registerTools } from "./tools.js";
+import { registerTools } from "./tools/index.js";
 
-// ─── Validate Environment ───────────────────────────────────
+// ─── Environment Schema ─────────────────────────────────────
 
-function validateEnv(): {
-  email: string;
-  apiToken: string;
-  defaultWorkspace?: string;
-  defaultRepoSlug?: string;
-} {
-  const email = process.env.BITBUCKET_EMAIL;
-  const apiToken = process.env.BITBUCKET_API_TOKEN;
+const EnvSchema = z.object({
+  BITBUCKET_EMAIL: z
+    .string({ required_error: "BITBUCKET_EMAIL is required" })
+    .min(1, "BITBUCKET_EMAIL cannot be empty"),
+  BITBUCKET_API_TOKEN: z
+    .string({ required_error: "BITBUCKET_API_TOKEN is required" })
+    .min(1, "BITBUCKET_API_TOKEN cannot be empty"),
+  BITBUCKET_DEFAULT_WORKSPACE: z.string().optional(),
+  BITBUCKET_DEFAULT_REPO_SLUG: z.string().optional(),
+  BITBUCKET_AI_TAG: z.string().optional(),
+  BITBUCKET_COMMENTS_PENDING: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => v === "true"),
+});
 
-  if (!email || !apiToken) {
+function validateEnv() {
+  const result = EnvSchema.safeParse(process.env);
+
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((i) => `  • ${i.path.join(".")}: ${i.message}`)
+      .join("\n");
     console.error(
-      "❌ Missing required environment variables:\n" +
-        "   BITBUCKET_EMAIL      - Your Atlassian account email\n" +
-        "   BITBUCKET_API_TOKEN  - Your Bitbucket API token\n\n" +
+      `❌ Invalid environment variables:\n${issues}\n\n` +
         "Create an API token at: https://bitbucket.org/account/settings/api-tokens/\n" +
         "Required scopes: Repositories (Read), Pull requests (Read & Write)"
     );
     process.exit(1);
   }
 
-  return {
-    email,
-    apiToken,
-    defaultWorkspace: process.env.BITBUCKET_DEFAULT_WORKSPACE || undefined,
-    defaultRepoSlug: process.env.BITBUCKET_DEFAULT_REPO_SLUG || undefined,
-  };
+  return result.data;
 }
 
 // ─── Main ────────────────────────────────────────────────────
@@ -60,11 +60,11 @@ async function main(): Promise<void> {
 
   // Initialize Bitbucket client
   const client = new BitbucketClient({
-    email: env.email,
-    apiToken: env.apiToken,
-    defaultWorkspace: env.defaultWorkspace,
-    defaultRepoSlug: env.defaultRepoSlug,
-    pendingComments: process.env.BITBUCKET_COMMENTS_PENDING === "true",
+    email: env.BITBUCKET_EMAIL,
+    apiToken: env.BITBUCKET_API_TOKEN,
+    defaultWorkspace: env.BITBUCKET_DEFAULT_WORKSPACE,
+    defaultRepoSlug: env.BITBUCKET_DEFAULT_REPO_SLUG,
+    pendingComments: env.BITBUCKET_COMMENTS_PENDING ?? false,
   });
 
   // Create MCP server
