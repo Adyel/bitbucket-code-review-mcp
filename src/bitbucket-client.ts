@@ -171,14 +171,39 @@ export class BitbucketClient {
 
   /**
    * Fetch all pages of a paginated endpoint, following `next` URLs.
+   *
+   * Requests the maximum page size (100) to minimize round trips and
+   * tracks visited URLs to guard against infinite pagination loops.
    */
   private async fetchAllPages<T>(path: string): Promise<T[]> {
+    const MAX_PAGES = 200; // safety limit — 200 × 100 = 20 000 items
     const allValues: T[] = [];
-    let currentUrl: string | undefined = `${BASE_URL}${path}`;
+    const seenUrls = new Set<string>();
+
+    // Append pagelen=100 (Bitbucket max) to the initial request
+    const separator = path.includes("?") ? "&" : "?";
+    let currentUrl: string | undefined = `${BASE_URL}${path}${separator}pagelen=100`;
+
+    let pageCount = 0;
 
     while (currentUrl) {
+      if (seenUrls.has(currentUrl)) {
+        // Circular `next` link detected — stop to prevent infinite loop
+        break;
+      }
+      seenUrls.add(currentUrl);
+
+      if (++pageCount > MAX_PAGES) {
+        break;
+      }
+
       const page: PaginatedResponse<T> = await this.request<PaginatedResponse<T>>("GET", currentUrl);
-      allValues.push(...page.values);
+
+      if (Array.isArray(page.values)) {
+        allValues.push(...page.values);
+      }
+
+      // `next` is either a full URL for the next page or absent / undefined
       currentUrl = page.next;
     }
 
