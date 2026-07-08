@@ -1,5 +1,5 @@
 /**
- * Bulk operation tools — Post multiple comments in a single call.
+ * Bulk tools — Post multiple comments in a single call.
  */
 
 import { z } from "zod";
@@ -9,23 +9,22 @@ import {
   WorkspaceSchema,
   RepoSlugSchema,
   PrIdSchema,
-  SeveritySchema,
+  CommentIdSchema,
 } from "../schemas/shared.js";
 import { toolResponse, withErrorHandling } from "../utils/response.js";
-import {
-  formatInlineComment,
-  type Severity,
-} from "../comment-formatter.js";
+import { formatComment } from "../comment-formatter.js";
+import { buildInlinePosition } from "./comments.js";
 
 export function registerBulk(
   server: McpServer,
   client: BitbucketClient
 ): void {
   server.registerTool(
-    "add_multiple_inline_comments",
+    "add_comments",
     {
       description:
-        "Post multiple inline comments in a single call for efficient batch reviewing. Each comment is auto-tagged with [AI Review].",
+        "Post multiple comments in one call for efficient batch reviewing. Each item is routed like add_comment (general / inline / file-level / reply). Comments are posted sequentially and per-item successes and failures are reported.",
+      annotations: { title: "Add comments (batch)" },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
@@ -33,20 +32,28 @@ export function registerBulk(
         comments: z
           .array(
             z.object({
+              comment: z
+                .string()
+                .describe("Comment content (Markdown supported)."),
               file_path: z
                 .string()
-                .describe("File path relative to repo root."),
+                .optional()
+                .describe(
+                  "File path for an inline or file-level comment. Omit for a general comment."
+                ),
               line: z
                 .number()
                 .int()
                 .positive()
-                .describe("Line number in the new file."),
-              comment: z.string().describe("Comment content."),
-              severity: SeveritySchema,
+                .optional()
+                .describe("Line number in the new file. Requires file_path."),
+              parent_id: CommentIdSchema.optional().describe(
+                "Parent comment ID to reply to. When set, positioning is ignored."
+              ),
             })
           )
           .min(1)
-          .describe("Array of inline comments to post."),
+          .describe("Array of comments to post."),
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, pr_id, comments }) => {
@@ -55,29 +62,28 @@ export function registerBulk(
 
       for (const item of comments) {
         try {
-          const formatted = formatInlineComment(
-            item.comment,
-            item.severity as Severity | undefined
-          );
+          const inline = item.parent_id
+            ? undefined
+            : buildInlinePosition(item.file_path, item.line);
           const result = await client.createPRComment(
             pr_id,
-            formatted,
-            { path: item.file_path, to: item.line },
-            undefined,
+            formatComment(item.comment),
+            inline,
+            item.parent_id,
             workspace,
             repo_slug
           );
           results.push({
             success: true,
             comment_id: result.id,
-            file: item.file_path,
-            line: item.line,
+            file: item.file_path ?? null,
+            line: item.line ?? null,
           });
         } catch (error) {
           errors.push({
             success: false,
-            file: item.file_path,
-            line: item.line,
+            file: item.file_path ?? null,
+            line: item.line ?? null,
             error: error instanceof Error ? error.message : String(error),
           });
         }

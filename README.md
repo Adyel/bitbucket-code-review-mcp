@@ -8,14 +8,16 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 | Category | Tools |
 |----------|-------|
-| **PR Discovery** | List PRs, get by ID/branch/URL, view diff, list changed files, read file content |
-| **Inline Comments** | Post on specific lines with severity emojis (💡⚠️🐛📝🔒) |
-| **Code Suggestions** | Single and multi-line suggestions with Bitbucket's `/suggest` syntax — one-click apply |
-| **File & General Comments** | File-level and PR-wide comments |
-| **Comment Management** | Reply, update (with marker), delete (AI-only guard), resolve/reopen |
+| **PR Discovery** | One `get_pull_request` (by ID, branch, or URL), list PRs, view diff, list changed files, read file content |
+| **Comments** | One `add_comment` for general / inline / file-level / reply, plus batch `add_comments` |
+| **Code Suggestions** | Single and multi-line suggestions with Bitbucket's suggestion syntax — one-click apply |
+| **Comment Management** | Edit (clean replace or append), delete (own comments only), resolve/reopen via one toggle |
 | **Pending Comments** | Create comments as draft — not published until reviewer submits review |
 | **Tasks** | Create, list, update tasks on PRs |
-| **Bulk Operations** | Post multiple inline comments in one call |
+
+> **v2 is a breaking change** — see [Migrating from v1](#-migrating-from-v1). The tool surface was
+> consolidated (21 → 15), severity was removed, `update_comment` now replaces by default, and
+> `delete_comment` no longer relies on a text tag.
 
 ## 🚀 Setup
 
@@ -121,10 +123,8 @@ Add to `~/.gemini/settings.json`:
 | Tool | Description |
 |------|-------------|
 | `list_pull_requests` | List PRs (filter by OPEN/MERGED/DECLINED/SUPERSEDED) |
-| `get_pull_request` | Get PR details by ID |
-| `get_pull_request_by_branch` | Find PR by source branch name |
-| `get_pull_request_from_url` | Parse a Bitbucket PR URL → get details |
-| `get_pull_request_diff` | Get full diff text |
+| `get_pull_request` | Get a PR by `pr_id`, `branch`, or `url` (provide exactly one) |
+| `get_pull_request_diff` | Get full diff text (large diffs truncated with a note) |
 | `list_pull_request_files` | List changed files with add/remove counts |
 | `get_file_content` | Read file content at a specific commit/branch/tag |
 
@@ -132,17 +132,13 @@ Add to `~/.gemini/settings.json`:
 
 | Tool | Description |
 |------|-------------|
-| `add_general_comment` | Post PR-level comment |
-| `add_inline_comment` | Post on a specific file:line with optional severity |
-| `add_inline_suggestion` | Post a code suggestion with optional `end_line` for multi-line spans |
-| `add_file_level_comment` | Post file-level comment |
-| `reply_to_comment` | Reply to a comment thread |
-| `update_comment` | Update any comment with additional context (appends `[✏️ Updated by AI]`) |
-| `delete_comment` | Delete AI comment only (human comments protected) |
+| `add_comment` | Add a comment — general (no `file_path`), inline (`file_path`+`line`), file-level (`file_path` only), or reply (`parent_id`) |
+| `add_suggestion` | Post a code suggestion with optional `end_line` for multi-line spans |
+| `add_comments` | Batch-post many comments (each routed like `add_comment`) |
+| `update_comment` | Edit a comment — clean replace by default; `append=true` to append, `mark=true` for an `[Updated by AI]` marker |
+| `delete_comment` | Delete a comment authored by this integration's own account |
 | `list_comments` | List all comments |
-| `resolve_comment` | Resolve a thread |
-| `reopen_comment` | Reopen a thread |
-| `add_multiple_inline_comments` | Batch post inline comments |
+| `set_comment_resolution` | Resolve (`resolved=true`) or reopen (`resolved=false`) a thread |
 
 ### Tasks
 
@@ -152,34 +148,57 @@ Add to `~/.gemini/settings.json`:
 | `list_tasks` | List all tasks |
 | `update_task` | Update task state (OPEN/RESOLVED) |
 
+Read-only tools (`list_*`, `get_*`) are annotated with `readOnlyHint`, and `delete_comment` with
+`destructiveHint`, so MCP hosts can auto-approve reads and confirm deletes appropriately.
+
 ## 🔒 Safety Guards
 
-- **Delete protection**: `delete_comment` fetches the comment first and checks for the `[AI Review]` tag. Human comments cannot be deleted through this MCP.
-- **Update traceability**: `update_comment` works on any comment (AI or human) but always appends an `[✏️ Updated by AI]` marker so every change is traceable.
-- **Configurable tags**: Set `BITBUCKET_AI_TAG` env var to customize the tag, or set to `""` to disable tagging entirely.
-- **Pending comments**: Set `BITBUCKET_COMMENTS_PENDING=true` to create comments as drafts that are only published when the reviewer submits the review.
+- **Delete protection**: `delete_comment` deletes only comments authored by the account the API
+  token authenticates as (checked via `GET /user`, cached). Bitbucket also enforces permission
+  server-side, and a `403` is surfaced as a clear message.
+- **Edit control**: `update_comment` cleanly replaces a comment by default. Pass `append=true` to
+  keep the old body, and `mark=true` to add an `[✏️ Updated by AI]` marker when you want the edit
+  to be visible.
+- **Configurable tag**: Set `BITBUCKET_AI_TAG` to customize the `[🤖 AI Review]` prefix, or `""` to
+  disable it. The tag is cosmetic — deletion no longer depends on it.
+- **Pending comments**: Set `BITBUCKET_COMMENTS_PENDING=true` to create comments as drafts that are
+  only published when the reviewer submits the review.
+
+> **Token scope:** use an API token for the review bot's *own* account. The authorship check keys
+> off that account, so an admin/shared token would let the bot delete comments authored by that
+> same account across the repo.
+
+## 🔀 Migrating from v1
+
+| v1 tool / param | v2 replacement |
+|---|---|
+| `get_pull_request_by_branch` | `get_pull_request` with `branch` |
+| `get_pull_request_from_url` | `get_pull_request` with `url` |
+| `add_general_comment` | `add_comment` (omit `file_path`) |
+| `add_inline_comment` | `add_comment` with `file_path` + `line` |
+| `add_file_level_comment` | `add_comment` with `file_path` only |
+| `reply_to_comment` | `add_comment` with `parent_id` |
+| `add_inline_suggestion` | `add_suggestion` |
+| `add_multiple_inline_comments` | `add_comments` |
+| `resolve_comment` / `reopen_comment` | `set_comment_resolution` with `resolved` |
+| `severity` parameter (all tools) | removed |
+| `update_comment` (append-only) | replaces by default; opt into append with `append=true` |
 
 ## 🔄 Resilience & Pagination
 
-- **Automatic pagination**: All list endpoints (`list_pull_requests`, `list_comments`, `list_pull_request_files`, `list_tasks`) automatically follow Bitbucket's `next` URLs to return complete results, even for large PRs.
+- **Automatic pagination**: All list endpoints (`list_pull_requests`, `list_comments`, `list_pull_request_files`, `list_tasks`) automatically follow Bitbucket's `next` URLs to return complete results, even for large PRs. If the safety cap (200 pages) or a circular link is hit, a warning is logged to stderr.
 - **Retry with backoff**: API requests automatically retry on HTTP 429 (rate limit) and 5xx (server errors) with exponential backoff, respecting `Retry-After` headers.
 
 ## 🎨 Comment Formatting
 
-All comments are auto-tagged and support severity levels:
+All comments are auto-tagged with the configurable `[🤖 AI Review]` prefix:
 
 ```
-[🤖 AI Review] 💡 Suggestion
+[🤖 AI Review]
 Use optional chaining for safer property access.
-
-[🤖 AI Review] 🐛 Bug
-This will throw a NullPointerException when `user` is null.
-
-[🤖 AI Review] 🔒 Security
-SQL injection risk — use parameterized queries.
 ```
 
-Code suggestions use Bitbucket's native syntax:
+Code suggestions use Bitbucket's native syntax and render an **Apply** button:
 
 ````
 [🤖 AI Review] 💡 Suggestion
@@ -195,18 +214,18 @@ const name = user?.name ?? 'default';
 ```
 src/
 ├── index.ts               # Entry point (Zod env validation, --version)
-├── bitbucket-client.ts    # API client (auth, pagination, retry)
-├── comment-formatter.ts   # Comment formatting & AI tag guards
+├── bitbucket-client.ts    # API client (auth, identity, pagination, retry, truncation)
+├── comment-formatter.ts   # Comment formatting & AI tag
 ├── schemas/
 │   └── shared.ts          # Shared Zod input schemas
 ├── utils/
 │   └── response.ts        # Response helpers & error handling
 └── tools/
     ├── index.ts            # Tool registration entry point
-    ├── pr-discovery.ts     # PR listing, diff, file content tools
-    ├── comments.ts         # Inline, file-level, general comments
+    ├── pr-discovery.ts     # PR lookup, diff, file content
+    ├── comments.ts         # add/update/delete/list/resolve comments
     ├── tasks.ts            # Task create/list/update
-    └── bulk.ts             # Batch inline comments
+    └── bulk.ts             # Batch comments (add_comments)
 ```
 
 ## 🤝 Contributing

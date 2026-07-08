@@ -21,6 +21,7 @@ export function registerTasks(
     {
       description:
         "Create a task on a pull request, optionally linked to a specific comment.",
+      annotations: { title: "Create task" },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
@@ -57,6 +58,7 @@ export function registerTasks(
     "list_tasks",
     {
       description: "List all tasks on a pull request.",
+      annotations: { title: "List tasks", readOnlyHint: true },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
@@ -82,6 +84,7 @@ export function registerTasks(
     {
       description:
         "Update a task's state on a pull request (OPEN or RESOLVED).",
+      annotations: { title: "Update task" },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,

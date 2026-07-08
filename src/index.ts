@@ -8,7 +8,8 @@
  * like Gemini CLI and Antigravity.
  *
  * The server does NOT review code itself — it provides tools for agents to
- * create comments tagged with [AI Review] for human review.
+ * create comments (auto-tagged with a configurable [AI Review] marker) for
+ * human review.
  */
 
 import { z } from "zod";
@@ -87,10 +88,23 @@ async function main(): Promise<void> {
   });
 
   // Create MCP server
-  const server = new McpServer({
-    name: "bitbucket-code-review",
-    version,
-  });
+  const server = new McpServer(
+    {
+      name: "bitbucket-code-review",
+      version,
+    },
+    {
+      instructions: [
+        "Tools for reviewing Bitbucket Cloud pull requests. Typical flow:",
+        "1. Find the PR with get_pull_request (by pr_id, branch, or pasted url) or list_pull_requests.",
+        "2. Read changes with get_pull_request_diff, list_pull_request_files, and get_file_content.",
+        "3. Leave feedback with add_comment (general/inline/file-level/reply), add_suggestion (one-click applicable fixes), or add_comments (batch).",
+        "4. Manage threads with update_comment, set_comment_resolution, delete_comment, and the task tools.",
+        "workspace/repo_slug are optional when BITBUCKET_DEFAULT_WORKSPACE / BITBUCKET_DEFAULT_REPO_SLUG are set.",
+        "delete_comment only removes comments authored by this integration's own account.",
+      ].join("\n"),
+    }
+  );
 
   // Register all tools
   registerTools(server, client);

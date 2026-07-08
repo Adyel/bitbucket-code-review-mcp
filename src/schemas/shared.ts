@@ -25,10 +25,3 @@ export const CommentIdSchema = z
   .int()
   .positive()
   .describe("The ID of the comment.");
-
-export const SeveritySchema = z
-  .enum(["suggestion", "warning", "bug", "note", "security"])
-  .optional()
-  .describe(
-    "Comment severity level. Adds emoji & label: 💡 Suggestion, ⚠️ Warning, 🐛 Bug, 📝 Note, 🔒 Security"
-  );

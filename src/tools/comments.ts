@@ -1,41 +1,59 @@
 /**
- * Comment tools — Add, update, delete, list, resolve, and reopen PR comments.
+ * Comment tools — add, suggest, update, delete, list, and resolve PR comments.
  */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { BitbucketClient } from "../bitbucket-client.js";
+import {
+  type BitbucketClient,
+  type InlinePosition,
+  BitbucketApiError,
+} from "../bitbucket-client.js";
 import {
   WorkspaceSchema,
   RepoSlugSchema,
   PrIdSchema,
   CommentIdSchema,
-  SeveritySchema,
 } from "../schemas/shared.js";
+import { toolResponse, toolError, withErrorHandling } from "../utils/response.js";
 import {
-  toolResponse,
-  withErrorHandling,
-} from "../utils/response.js";
-import {
-  formatGeneralComment,
-  formatInlineComment,
+  formatComment,
   formatCodeSuggestion,
   formatUpdatedComment,
-  formatReply,
-  formatFileLevelComment,
-  isAIComment,
-  type Severity,
 } from "../comment-formatter.js";
+
+/**
+ * Build the inline position for a comment from its optional location fields.
+ * Returns undefined for a general (PR-level) comment.
+ */
+export function buildInlinePosition(
+  filePath?: string,
+  line?: number,
+  endLine?: number
+): InlinePosition | undefined {
+  if (!filePath) return undefined;
+  const inline: InlinePosition = { path: filePath };
+  if (line !== undefined) {
+    if (endLine !== undefined) {
+      inline.from = line;
+      inline.to = endLine;
+    } else {
+      inline.to = line;
+    }
+  }
+  return inline;
+}
 
 export function registerComments(
   server: McpServer,
   client: BitbucketClient
 ): void {
   server.registerTool(
-    "add_general_comment",
+    "add_comment",
     {
       description:
-        "Post a general (non-inline) comment on a pull request. Auto-tagged with [AI Review].",
+        "Add a comment to a pull request. Omit file_path for a general PR comment; give file_path + line for an inline comment; give file_path only for a file-level comment; give parent_id to reply in a thread. For applicable code changes use add_suggestion; to post many comments at once use add_comments.",
+      annotations: { title: "Add comment" },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
@@ -43,79 +61,64 @@ export function registerComments(
         comment: z
           .string()
           .describe("The comment content (Markdown supported)."),
-      },
-    },
-    withErrorHandling(async ({ workspace, repo_slug, pr_id, comment }) => {
-      const formatted = formatGeneralComment(comment);
-      const result = await client.createPRComment(
-        pr_id,
-        formatted,
-        undefined,
-        undefined,
-        workspace,
-        repo_slug
-      );
-      return toolResponse({
-        success: true,
-        comment_id: result.id,
-        message: "General comment posted successfully.",
-      });
-    })
-  );
-
-  server.registerTool(
-    "add_inline_comment",
-    {
-      description:
-        "Post an inline comment on a specific line of a specific file in a pull request. Auto-tagged with [AI Review].",
-      inputSchema: {
-        workspace: WorkspaceSchema,
-        repo_slug: RepoSlugSchema,
-        pr_id: PrIdSchema,
         file_path: z
           .string()
-          .describe("File path relative to repo root, e.g. src/utils.ts"),
+          .optional()
+          .describe(
+            "File path relative to repo root for an inline or file-level comment. Omit for a general comment."
+          ),
         line: z
           .number()
           .int()
           .positive()
-          .describe("Line number in the new version of the file."),
-        comment: z
-          .string()
-          .describe("The comment content (Markdown supported)."),
-        severity: SeveritySchema,
+          .optional()
+          .describe(
+            "Line number in the new version of the file. Requires file_path."
+          ),
+        parent_id: CommentIdSchema.optional().describe(
+          "Parent comment ID to reply to. When set, positioning fields are ignored."
+        ),
       },
     },
     withErrorHandling(
-      async ({ workspace, repo_slug, pr_id, file_path, line, comment, severity }) => {
-        const formatted = formatInlineComment(
-          comment,
-          severity as Severity | undefined
-        );
+      async ({
+        workspace,
+        repo_slug,
+        pr_id,
+        comment,
+        file_path,
+        line,
+        parent_id,
+      }) => {
+        if (line !== undefined && !file_path) {
+          return toolError("`line` requires `file_path`.");
+        }
+        const inline = parent_id
+          ? undefined
+          : buildInlinePosition(file_path, line);
         const result = await client.createPRComment(
           pr_id,
-          formatted,
-          { path: file_path, to: line },
-          undefined,
+          formatComment(comment),
+          inline,
+          parent_id,
           workspace,
           repo_slug
         );
         return toolResponse({
           success: true,
           comment_id: result.id,
-          file: file_path,
-          line,
-          message: "Inline comment posted successfully.",
+          message: "Comment posted successfully.",
         });
       }
     )
   );
 
   server.registerTool(
-    "add_inline_suggestion",
+    "add_suggestion",
     {
       description:
-        "Post a code suggestion on a specific line using Bitbucket's suggestion syntax. The PR author can apply it with one click in Bitbucket UI.",
+        "Post a code suggestion on one or more lines using Bitbucket's suggestion syntax. The PR author can apply it with one click in the Bitbucket UI.",
+      annotations: { title: "Add code suggestion" },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
@@ -132,12 +135,12 @@ export function registerComments(
           .positive()
           .optional()
           .describe(
-            "Optional end line for multi-line suggestions. When set, the suggestion spans from 'line' to 'end_line'."
+            "Optional end line for multi-line suggestions spanning line..end_line."
           ),
         suggested_code: z
           .string()
           .describe(
-            "The suggested replacement code. This will render as an applicable suggestion in Bitbucket."
+            "The suggested replacement code. Renders as an applicable suggestion in Bitbucket."
           ),
         explanation: z
           .string()
@@ -156,19 +159,10 @@ export function registerComments(
         suggested_code,
         explanation,
       }) => {
-        const formatted = formatCodeSuggestion(suggested_code, explanation);
-        const inlinePos: { path: string; to: number; from?: number } = {
-          path: file_path,
-          to: line,
-        };
-        if (end_line) {
-          inlinePos.from = line;
-          inlinePos.to = end_line;
-        }
         const result = await client.createPRComment(
           pr_id,
-          formatted,
-          inlinePos,
+          formatCodeSuggestion(suggested_code, explanation),
+          buildInlinePosition(file_path, line, end_line),
           undefined,
           workspace,
           repo_slug
@@ -186,87 +180,11 @@ export function registerComments(
   );
 
   server.registerTool(
-    "add_file_level_comment",
-    {
-      description:
-        "Post a file-level comment (not on a specific line) on a file in a pull request.",
-      inputSchema: {
-        workspace: WorkspaceSchema,
-        repo_slug: RepoSlugSchema,
-        pr_id: PrIdSchema,
-        file_path: z.string().describe("File path relative to repo root."),
-        comment: z
-          .string()
-          .describe("The comment content (Markdown supported)."),
-        severity: SeveritySchema,
-      },
-    },
-    withErrorHandling(
-      async ({ workspace, repo_slug, pr_id, file_path, comment, severity }) => {
-        const formatted = formatFileLevelComment(
-          comment,
-          severity as Severity | undefined
-        );
-        const result = await client.createPRComment(
-          pr_id,
-          formatted,
-          { path: file_path },
-          undefined,
-          workspace,
-          repo_slug
-        );
-        return toolResponse({
-          success: true,
-          comment_id: result.id,
-          file: file_path,
-          message: "File-level comment posted successfully.",
-        });
-      }
-    )
-  );
-
-  server.registerTool(
-    "reply_to_comment",
-    {
-      description: "Reply to an existing comment thread on a pull request.",
-      inputSchema: {
-        workspace: WorkspaceSchema,
-        repo_slug: RepoSlugSchema,
-        pr_id: PrIdSchema,
-        comment_id: CommentIdSchema.describe(
-          "The ID of the parent comment to reply to."
-        ),
-        comment: z
-          .string()
-          .describe("The reply content (Markdown supported)."),
-      },
-    },
-    withErrorHandling(
-      async ({ workspace, repo_slug, pr_id, comment_id, comment }) => {
-        const formatted = formatReply(comment);
-        const result = await client.createPRComment(
-          pr_id,
-          formatted,
-          undefined,
-          comment_id,
-          workspace,
-          repo_slug
-        );
-        return toolResponse({
-          success: true,
-          comment_id: result.id,
-          parent_id: comment_id,
-          message: "Reply posted successfully.",
-        });
-      }
-    )
-  );
-
-  server.registerTool(
     "update_comment",
     {
       description:
-        "Update an existing comment with additional context, details, or examples. Appends an [Updated by AI] marker so changes are traceable. Works on any comment (AI or human).",
+        "Edit an existing comment. By default the body is replaced with new_content. Set append=true to keep the old body and add new_content below a divider. Set mark=true to prefix an [Updated by AI] marker.",
+      annotations: { title: "Update comment" },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
@@ -274,20 +192,45 @@ export function registerComments(
         comment_id: CommentIdSchema.describe("The ID of the comment to update."),
         new_content: z
           .string()
+          .describe("The new comment body (Markdown supported)."),
+        append: z
+          .boolean()
+          .optional()
           .describe(
-            "Additional content to append (context, issues, examples)."
+            "Append to the existing body instead of replacing it. Defaults to false (clean replace)."
+          ),
+        mark: z
+          .boolean()
+          .optional()
+          .describe(
+            "Prefix an [Updated by AI] marker so the edit is traceable. Defaults to false."
           ),
       },
     },
     withErrorHandling(
-      async ({ workspace, repo_slug, pr_id, comment_id, new_content }) => {
-        const existing = await client.getPRComment(
-          pr_id,
-          comment_id,
-          workspace,
-          repo_slug
-        );
-        const updated = formatUpdatedComment(existing.content.raw, new_content);
+      async ({
+        workspace,
+        repo_slug,
+        pr_id,
+        comment_id,
+        new_content,
+        append = false,
+        mark = false,
+      }) => {
+        let existingRaw = "";
+        if (append) {
+          const existing = await client.getPRComment(
+            pr_id,
+            comment_id,
+            workspace,
+            repo_slug
+          );
+          existingRaw = existing.content.raw;
+        }
+        const updated = formatUpdatedComment(existingRaw, new_content, {
+          append,
+          mark,
+        });
         const result = await client.updatePRComment(
           pr_id,
           comment_id,
@@ -298,8 +241,9 @@ export function registerComments(
         return toolResponse({
           success: true,
           comment_id: result.id,
-          message:
-            "Comment updated successfully with [Updated by AI] marker.",
+          message: append
+            ? "Comment updated (appended)."
+            : "Comment updated (replaced).",
         });
       }
     )
@@ -309,47 +253,64 @@ export function registerComments(
     "delete_comment",
     {
       description:
-        "Delete an AI-generated comment. SAFETY: Only comments containing the [AI Review] tag can be deleted. Human comments are protected.",
+        "Delete a comment. Only comments authored by this integration's own account can be deleted; Bitbucket also enforces permission server-side.",
+      annotations: { title: "Delete comment", destructiveHint: true },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
         pr_id: PrIdSchema,
-        comment_id: CommentIdSchema.describe(
-          "The ID of the comment to delete."
-        ),
+        comment_id: CommentIdSchema.describe("The ID of the comment to delete."),
       },
     },
-    withErrorHandling(
-      async ({ workspace, repo_slug, pr_id, comment_id }) => {
-        const existing = await client.getPRComment(
-          pr_id,
-          comment_id,
-          workspace,
-          repo_slug
-        );
+    withErrorHandling(async ({ workspace, repo_slug, pr_id, comment_id }) => {
+      const existing = await client.getPRComment(
+        pr_id,
+        comment_id,
+        workspace,
+        repo_slug
+      );
 
-        if (!isAIComment(existing.content.raw)) {
-          return toolResponse({
-            success: false,
-            error:
-              "Cannot delete this comment — it was not created by AI. Only comments with the [AI Review] tag can be deleted to protect human comments.",
-          });
+      // Belt: block the obvious "delete someone else's comment" case when we
+      // can determine our own identity. If /user is unavailable (e.g. the token
+      // lacks the account scope), skip the local check and let Bitbucket's API
+      // be the authority (suspenders — the 403 mapping below).
+      try {
+        const me = await client.getCurrentUser();
+        if (existing.user.uuid !== me.uuid) {
+          return toolError(
+            `Refusing to delete: comment ${comment_id} was authored by ${existing.user.display_name}, not this integration. Only your own comments can be deleted.`
+          );
         }
-
-        await client.deletePRComment(pr_id, comment_id, workspace, repo_slug);
-        return toolResponse({
-          success: true,
-          comment_id,
-          message: "AI comment deleted successfully.",
-        });
+      } catch {
+        console.error(
+          "[bitbucket] could not resolve current user for delete authorship check — relying on Bitbucket to enforce permission"
+        );
       }
-    )
+
+      try {
+        await client.deletePRComment(pr_id, comment_id, workspace, repo_slug);
+      } catch (error) {
+        if (error instanceof BitbucketApiError && error.status === 403) {
+          return toolError(
+            "Bitbucket rejected the delete (403): the token lacks permission to delete this comment."
+          );
+        }
+        throw error;
+      }
+
+      return toolResponse({
+        success: true,
+        comment_id,
+        message: "Comment deleted successfully.",
+      });
+    })
   );
 
   server.registerTool(
     "list_comments",
     {
-      description: "List all existing comments on a pull request.",
+      description: "List all existing (non-deleted) comments on a pull request.",
+      annotations: { title: "List comments", readOnlyHint: true },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
@@ -357,14 +318,17 @@ export function registerComments(
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, pr_id }) => {
-      const allComments = await client.listPRComments(pr_id, workspace, repo_slug);
+      const allComments = await client.listPRComments(
+        pr_id,
+        workspace,
+        repo_slug
+      );
       const comments = allComments
         .filter((c) => !c.deleted)
         .map((c) => ({
           id: c.id,
           author: c.user.display_name,
           content: c.content.raw,
-          is_ai: isAIComment(c.content.raw),
           inline: c.inline
             ? {
                 file: c.inline.path,
@@ -381,51 +345,37 @@ export function registerComments(
   );
 
   server.registerTool(
-    "resolve_comment",
-    {
-      description: "Resolve a comment thread on a pull request.",
-      inputSchema: {
-        workspace: WorkspaceSchema,
-        repo_slug: RepoSlugSchema,
-        pr_id: PrIdSchema,
-        comment_id: CommentIdSchema.describe(
-          "The ID of the comment thread to resolve."
-        ),
-      },
-    },
-    withErrorHandling(
-      async ({ workspace, repo_slug, pr_id, comment_id }) => {
-        await client.resolveComment(pr_id, comment_id, workspace, repo_slug);
-        return toolResponse({
-          success: true,
-          comment_id,
-          message: "Comment thread resolved.",
-        });
-      }
-    )
-  );
-
-  server.registerTool(
-    "reopen_comment",
+    "set_comment_resolution",
     {
       description:
-        "Reopen a previously resolved comment thread on a pull request.",
+        "Resolve or reopen a comment thread on a pull request. Set resolved=true to resolve, false to reopen.",
+      annotations: { title: "Set comment resolution" },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
         pr_id: PrIdSchema,
         comment_id: CommentIdSchema.describe(
-          "The ID of the comment thread to reopen."
+          "The ID of the comment thread to resolve or reopen."
         ),
+        resolved: z
+          .boolean()
+          .describe("true to resolve the thread, false to reopen it."),
       },
     },
     withErrorHandling(
-      async ({ workspace, repo_slug, pr_id, comment_id }) => {
-        await client.reopenComment(pr_id, comment_id, workspace, repo_slug);
+      async ({ workspace, repo_slug, pr_id, comment_id, resolved }) => {
+        if (resolved) {
+          await client.resolveComment(pr_id, comment_id, workspace, repo_slug);
+        } else {
+          await client.reopenComment(pr_id, comment_id, workspace, repo_slug);
+        }
         return toolResponse({
           success: true,
           comment_id,
-          message: "Comment thread reopened.",
+          resolved,
+          message: resolved
+            ? "Comment thread resolved."
+            : "Comment thread reopened.",
         });
       }
     )

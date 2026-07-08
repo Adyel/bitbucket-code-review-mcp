@@ -2,17 +2,13 @@
  * Unit tests for comment-formatter.ts
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   getAITag,
   isTagEnabled,
-  isAIComment,
-  formatGeneralComment,
-  formatInlineComment,
+  formatComment,
   formatCodeSuggestion,
   formatUpdatedComment,
-  formatReply,
-  formatFileLevelComment,
   getUpdateMarker,
 } from "../src/comment-formatter.js";
 
@@ -60,88 +56,35 @@ describe("comment-formatter", () => {
     });
   });
 
-  // ─── isAIComment ──────────────────────────────────────────
+  // ─── formatComment ─────────────────────────────────────────
 
-  describe("isAIComment", () => {
-    it("detects default AI tag", () => {
-      delete process.env.BITBUCKET_AI_TAG;
-      expect(isAIComment("**[🤖 AI Review]**\n\nSome comment")).toBe(true);
-    });
-
-    it("returns false for human comment", () => {
-      delete process.env.BITBUCKET_AI_TAG;
-      expect(isAIComment("This is a human comment")).toBe(false);
-    });
-
-    it("detects custom AI tag", () => {
-      process.env.BITBUCKET_AI_TAG = "Bot Review";
-      expect(isAIComment("**[Bot Review]** Some comment")).toBe(true);
-    });
-
-    it("does NOT match hardcoded fallback when custom tag is set", () => {
-      process.env.BITBUCKET_AI_TAG = "Custom Tag";
-      expect(isAIComment("[AI Review] old comment")).toBe(false);
-    });
-
-    it("returns false when tagging is disabled", () => {
-      process.env.BITBUCKET_AI_TAG = "";
-      expect(isAIComment("**[🤖 AI Review]** whatever")).toBe(false);
-    });
-  });
-
-  // ─── formatGeneralComment ─────────────────────────────────
-
-  describe("formatGeneralComment", () => {
+  describe("formatComment", () => {
     it("prepends AI tag", () => {
       delete process.env.BITBUCKET_AI_TAG;
-      const result = formatGeneralComment("Great code!");
+      const result = formatComment("Great code!");
       expect(result).toContain("**[🤖 AI Review]**");
       expect(result).toContain("Great code!");
     });
 
+    it("respects a custom tag", () => {
+      process.env.BITBUCKET_AI_TAG = "Bot Review";
+      expect(formatComment("hi")).toContain("**[Bot Review]**");
+    });
+
     it("omits tag when disabled", () => {
       process.env.BITBUCKET_AI_TAG = "";
-      const result = formatGeneralComment("Great code!");
-      expect(result).toBe("Great code!");
-    });
-  });
-
-  // ─── formatInlineComment ──────────────────────────────────
-
-  describe("formatInlineComment", () => {
-    it("formats with severity", () => {
-      delete process.env.BITBUCKET_AI_TAG;
-      const result = formatInlineComment("Use const", "suggestion");
-      expect(result).toContain("💡");
-      expect(result).toContain("**Suggestion**");
-      expect(result).toContain("Use const");
-    });
-
-    it("formats without severity", () => {
-      delete process.env.BITBUCKET_AI_TAG;
-      const result = formatInlineComment("Note this");
-      expect(result).toContain("**[🤖 AI Review]**");
-      expect(result).toContain("Note this");
-    });
-
-    it("formats all severity types", () => {
-      delete process.env.BITBUCKET_AI_TAG;
-      expect(formatInlineComment("x", "bug")).toContain("🐛");
-      expect(formatInlineComment("x", "warning")).toContain("⚠️");
-      expect(formatInlineComment("x", "note")).toContain("📝");
-      expect(formatInlineComment("x", "security")).toContain("🔒");
+      expect(formatComment("Great code!")).toBe("Great code!");
     });
   });
 
   // ─── formatCodeSuggestion ─────────────────────────────────
 
   describe("formatCodeSuggestion", () => {
-    it("wraps code in suggestion block", () => {
+    it("wraps code in a suggestion block", () => {
       delete process.env.BITBUCKET_AI_TAG;
       const result = formatCodeSuggestion("const x = 1;");
       expect(result).toContain("```suggestion");
       expect(result).toContain("const x = 1;");
-      expect(result).toContain("```");
     });
 
     it("includes explanation when provided", () => {
@@ -154,34 +97,39 @@ describe("comment-formatter", () => {
   // ─── formatUpdatedComment ─────────────────────────────────
 
   describe("formatUpdatedComment", () => {
-    it("appends update marker", () => {
-      const result = formatUpdatedComment("Original", "New info");
+    it("replaces cleanly by default (no marker, no old body)", () => {
+      const result = formatUpdatedComment("Original", "New body");
+      expect(result).toBe("New body");
+      expect(result).not.toContain("Original");
+      expect(result).not.toContain(getUpdateMarker());
+    });
+
+    it("prefixes the marker when mark=true", () => {
+      const result = formatUpdatedComment("Original", "New body", {
+        mark: true,
+      });
+      expect(result).toContain(getUpdateMarker());
+      expect(result).toContain("New body");
+      expect(result).not.toContain("Original");
+    });
+
+    it("keeps the old body and adds a divider when append=true", () => {
+      const result = formatUpdatedComment("Original", "New body", {
+        append: true,
+      });
       expect(result).toContain("Original");
-      expect(result).toContain("New info");
-      expect(result).toContain("✏️ Updated by AI");
       expect(result).toContain("---");
+      expect(result).toContain("New body");
     });
-  });
 
-  // ─── formatReply ──────────────────────────────────────────
-
-  describe("formatReply", () => {
-    it("formats with AI tag", () => {
-      delete process.env.BITBUCKET_AI_TAG;
-      const result = formatReply("I agree");
-      expect(result).toContain("**[🤖 AI Review]**");
-      expect(result).toContain("I agree");
-    });
-  });
-
-  // ─── formatFileLevelComment ───────────────────────────────
-
-  describe("formatFileLevelComment", () => {
-    it("delegates to formatInlineComment", () => {
-      delete process.env.BITBUCKET_AI_TAG;
-      const result = formatFileLevelComment("File issue", "warning");
-      expect(result).toContain("⚠️");
-      expect(result).toContain("File issue");
+    it("appends with a marker when append and mark are both true", () => {
+      const result = formatUpdatedComment("Original", "New body", {
+        append: true,
+        mark: true,
+      });
+      expect(result).toContain("Original");
+      expect(result).toContain(getUpdateMarker());
+      expect(result).toContain("New body");
     });
   });
 });
