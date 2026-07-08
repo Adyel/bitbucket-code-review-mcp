@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v1.0.0...v2.0.0) (2026-07-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* several tools were removed or renamed and the `severity` parameter was dropped. Migration:   - get_pull_request_by_branch / get_pull_request_from_url       -> get_pull_request (branch / url)   - add_general_comment / add_inline_comment / add_file_level_comment /     reply_to_comment       -> add_comment (routes on file_path / line / parent_id)   - add_inline_suggestion        -> add_suggestion   - add_multiple_inline_comments -> add_comments   - resolve_comment / reopen_comment -> set_comment_resolution (resolved bool)   - severity parameter           -> removed
+
+### Features
+
+* lean v2 redesign — consolidate tools, fix delete/update, drop severity ([e8b0b60](https://github.com/Adyel/bitbucket-code-review-mcp/commit/e8b0b604cbdae9b541b39757a5c763ab018aad2d))
+
 ## 1.0.0 (2026-04-20)
 
 
