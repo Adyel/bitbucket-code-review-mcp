@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { BitbucketClient } from "../src/bitbucket-client.js";
+import { BitbucketClient, truncateText } from "../src/bitbucket-client.js";
 
 describe("BitbucketClient", () => {
   const client = new BitbucketClient({
@@ -74,6 +74,21 @@ describe("BitbucketClient", () => {
       // We can't directly test private methods, but we can verify
       // the config is stored by checking parsePullRequestUrl still works
       expect(clientWithDefaults).toBeDefined();
+    });
+  });
+
+  // ─── truncateText ─────────────────────────────────────────
+
+  describe("truncateText", () => {
+    it("returns text unchanged when under the limit", () => {
+      expect(truncateText("short", 100)).toBe("short");
+    });
+
+    it("truncates and appends a note when over the limit", () => {
+      const result = truncateText("abcdefghij", 4);
+      expect(result).toContain("abcd");
+      expect(result).toContain("truncated");
+      expect(result).toContain("of 10 characters");
     });
   });
 });

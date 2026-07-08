@@ -1,20 +1,51 @@
 /**
- * PR Discovery tools — List, get, search pull requests and view diffs/changes.
+ * PR Discovery tools — Find pull requests and read their diffs, files, and content.
  */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { BitbucketClient } from "../bitbucket-client.js";
+import type { BitbucketClient, PullRequest } from "../bitbucket-client.js";
 import {
   WorkspaceSchema,
   RepoSlugSchema,
-  PrIdSchema,
 } from "../schemas/shared.js";
 import {
   toolResponse,
   toolTextResponse,
+  toolError,
   withErrorHandling,
 } from "../utils/response.js";
+
+/** Compact summary used in list views. */
+function summarizePR(pr: PullRequest) {
+  return {
+    id: pr.id,
+    title: pr.title,
+    state: pr.state,
+    author: pr.author.display_name,
+    source_branch: pr.source.branch.name,
+    destination_branch: pr.destination.branch.name,
+    url: pr.links.html.href,
+    created: pr.created_on,
+  };
+}
+
+/** Full detail used when a single PR is fetched. */
+function detailPR(pr: PullRequest) {
+  return {
+    id: pr.id,
+    title: pr.title,
+    description: pr.description,
+    state: pr.state,
+    author: pr.author.display_name,
+    source_branch: pr.source.branch.name,
+    destination_branch: pr.destination.branch.name,
+    reviewers: pr.reviewers.map((r) => r.display_name),
+    url: pr.links.html.href,
+    created: pr.created_on,
+    updated: pr.updated_on,
+  };
+}
 
 export function registerPRDiscovery(
   server: McpServer,
@@ -24,7 +55,8 @@ export function registerPRDiscovery(
     "list_pull_requests",
     {
       description:
-        "List pull requests for a repository, filterable by state (OPEN, MERGED, DECLINED, SUPERSEDED).",
+        "List pull requests for a repository, filterable by state (OPEN, MERGED, DECLINED, SUPERSEDED). To fetch one specific PR, use get_pull_request instead.",
+      annotations: { title: "List pull requests", readOnlyHint: true },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
@@ -40,139 +72,92 @@ export function registerPRDiscovery(
         repo_slug,
         state || "OPEN"
       );
-      const mapped = prs.map((pr) => ({
-        id: pr.id,
-        title: pr.title,
-        state: pr.state,
-        author: pr.author.display_name,
-        source_branch: pr.source.branch.name,
-        destination_branch: pr.destination.branch.name,
-        url: pr.links.html.href,
-        created: pr.created_on,
-      }));
-      return toolResponse({ pull_requests: mapped });
+      return toolResponse({ pull_requests: prs.map(summarizePR) });
     })
   );
 
   server.registerTool(
     "get_pull_request",
     {
-      description: "Get details of a specific pull request by ID.",
-      inputSchema: {
-        workspace: WorkspaceSchema,
-        repo_slug: RepoSlugSchema,
-        pr_id: PrIdSchema,
-      },
-    },
-    withErrorHandling(async ({ workspace, repo_slug, pr_id }) => {
-      const pr = await client.getPullRequest(pr_id, workspace, repo_slug);
-      return toolResponse({
-        id: pr.id,
-        title: pr.title,
-        description: pr.description,
-        state: pr.state,
-        author: pr.author.display_name,
-        source_branch: pr.source.branch.name,
-        destination_branch: pr.destination.branch.name,
-        reviewers: pr.reviewers.map((r) => r.display_name),
-        url: pr.links.html.href,
-        created: pr.created_on,
-        updated: pr.updated_on,
-      });
-    })
-  );
-
-  server.registerTool(
-    "get_pull_request_by_branch",
-    {
       description:
-        "Find pull requests by source branch name. Useful when you know the branch but not the PR ID.",
+        "Get a pull request by ID, by source branch name, or from a pasted Bitbucket URL. Provide exactly one of pr_id, branch, or url. Branch lookup may return multiple PRs; pr_id and url return a single PR.",
+      annotations: { title: "Get pull request", readOnlyHint: true },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
-        branch_name: z
+        pr_id: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Pull request ID. Use this when you know the PR number."),
+        branch: z
           .string()
-          .describe("The source branch name to search for."),
-      },
-    },
-    withErrorHandling(async ({ workspace, repo_slug, branch_name }) => {
-      const prs = await client.getPullRequestByBranch(
-        branch_name,
-        workspace,
-        repo_slug
-      );
-      const mapped = prs.map((pr) => ({
-        id: pr.id,
-        title: pr.title,
-        state: pr.state,
-        author: pr.author.display_name,
-        source_branch: pr.source.branch.name,
-        destination_branch: pr.destination.branch.name,
-        url: pr.links.html.href,
-      }));
-
-      if (mapped.length === 0) {
-        return toolTextResponse(
-          `No pull requests found for branch "${branch_name}".`
-        );
-      }
-      return toolResponse({ pull_requests: mapped });
-    })
-  );
-
-  server.registerTool(
-    "get_pull_request_from_url",
-    {
-      description:
-        "Parse a Bitbucket PR URL and return the pull request details. Useful when user pastes a URL.",
-      inputSchema: {
-        pr_url: z
+          .optional()
+          .describe(
+            "Source branch name. Use when you know the branch but not the PR ID; may match multiple PRs."
+          ),
+        url: z
           .string()
           .url()
+          .optional()
           .describe(
-            "Full Bitbucket PR URL, e.g. https://bitbucket.org/workspace/repo/pull-requests/123"
+            "Full Bitbucket PR URL, e.g. https://bitbucket.org/workspace/repo/pull-requests/123. Workspace and repo are parsed from it."
           ),
       },
     },
-    withErrorHandling(async ({ pr_url }) => {
-      const ref = client.parsePullRequestUrl(pr_url);
-      const pr = await client.getPullRequest(
-        ref.prId,
-        ref.workspace,
-        ref.repoSlug
-      );
-      return toolResponse({
-        id: pr.id,
-        title: pr.title,
-        description: pr.description,
-        state: pr.state,
-        author: pr.author.display_name,
-        source_branch: pr.source.branch.name,
-        destination_branch: pr.destination.branch.name,
-        reviewers: pr.reviewers.map((r) => r.display_name),
-        url: pr.links.html.href,
-        workspace: ref.workspace,
-        repo_slug: ref.repoSlug,
-      });
+    withErrorHandling(async ({ workspace, repo_slug, pr_id, branch, url }) => {
+      if (url) {
+        const ref = client.parsePullRequestUrl(url);
+        const pr = await client.getPullRequest(
+          ref.prId,
+          ref.workspace,
+          ref.repoSlug
+        );
+        return toolResponse({
+          ...detailPR(pr),
+          workspace: ref.workspace,
+          repo_slug: ref.repoSlug,
+        });
+      }
+
+      if (pr_id) {
+        const pr = await client.getPullRequest(pr_id, workspace, repo_slug);
+        return toolResponse(detailPR(pr));
+      }
+
+      if (branch) {
+        const prs = await client.getPullRequestByBranch(
+          branch,
+          workspace,
+          repo_slug
+        );
+        if (prs.length === 0) {
+          return toolTextResponse(
+            `No pull requests found for branch "${branch}".`
+          );
+        }
+        return toolResponse({ pull_requests: prs.map(summarizePR) });
+      }
+
+      return toolError("Provide exactly one of: pr_id, branch, or url.");
     })
   );
 
   server.registerTool(
     "get_pull_request_diff",
     {
-      description: "Get the full diff text for a pull request.",
+      description:
+        "Get the full unified diff text for a pull request. Large diffs are truncated with a note.",
+      annotations: { title: "Get PR diff", readOnlyHint: true },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
-        pr_id: PrIdSchema,
+        pr_id: z.number().int().positive().describe("Pull request ID."),
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, pr_id }) => {
-      const diff = await client.getPullRequestDiff(
-        pr_id,
-        workspace,
-        repo_slug
-      );
+      const diff = await client.getPullRequestDiff(pr_id, workspace, repo_slug);
       return toolTextResponse(diff);
     })
   );
@@ -182,10 +167,11 @@ export function registerPRDiscovery(
     {
       description:
         "List files changed in a pull request with their status (added/modified/deleted/renamed) and line counts.",
+      annotations: { title: "List PR files", readOnlyHint: true },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,
-        pr_id: PrIdSchema,
+        pr_id: z.number().int().positive().describe("Pull request ID."),
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, pr_id }) => {
@@ -205,7 +191,8 @@ export function registerPRDiscovery(
     "get_file_content",
     {
       description:
-        "Get the content of a specific file at a given commit/branch/tag. Useful for reading full file content during code review.",
+        "Get the content of a specific file at a given commit/branch/tag. Useful for reading full file context during review. Large files are truncated with a note.",
+      annotations: { title: "Get file content", readOnlyHint: true },
       inputSchema: {
         workspace: WorkspaceSchema,
         repo_slug: RepoSlugSchema,

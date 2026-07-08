@@ -7,6 +7,28 @@
 const BASE_URL = "https://api.bitbucket.org/2.0";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
+/** Cap for large text payloads (diffs, file content) to avoid flooding context. */
+const MAX_TEXT_CHARS = 1_000_000;
+
+/**
+ * Error carrying the HTTP status of a failed Bitbucket API call so callers can
+ * branch on it (e.g. map 403 to a friendly permission message).
+ */
+export class BitbucketApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message);
+    this.name = "BitbucketApiError";
+  }
+}
+
+/** Truncate oversized text and append a note so the reader knows it was cut. */
+export function truncateText(text: string, max = MAX_TEXT_CHARS): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n\n… [truncated — showing ${max} of ${text.length} characters]`;
+}
 
 export interface BitbucketConfig {
   email: string;
@@ -14,6 +36,12 @@ export interface BitbucketConfig {
   defaultWorkspace?: string;
   defaultRepoSlug?: string;
   pendingComments?: boolean;
+}
+
+export interface BitbucketUser {
+  uuid: string;
+  display_name: string;
+  account_id?: string;
 }
 
 export interface PRReference {
@@ -90,6 +118,7 @@ export interface PaginatedResponse<T> {
 export class BitbucketClient {
   private config: BitbucketConfig;
   private readonly authHeader: string;
+  private currentUser?: BitbucketUser;
 
   constructor(config: BitbucketConfig) {
     this.config = config;
@@ -146,7 +175,8 @@ export class BitbucketClient {
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw new Error(
+        throw new BitbucketApiError(
+          response.status,
           `Bitbucket API error ${response.status} ${response.statusText}: ${errorBody}`
         );
       }
@@ -189,11 +219,17 @@ export class BitbucketClient {
     while (currentUrl) {
       if (seenUrls.has(currentUrl)) {
         // Circular `next` link detected — stop to prevent infinite loop
+        console.error(
+          `[bitbucket] pagination stopped: circular 'next' link after ${allValues.length} items`
+        );
         break;
       }
       seenUrls.add(currentUrl);
 
       if (++pageCount > MAX_PAGES) {
+        console.error(
+          `[bitbucket] pagination cap reached (${MAX_PAGES} pages) — results may be incomplete (${allValues.length} items)`
+        );
         break;
       }
 
@@ -228,6 +264,19 @@ export class BitbucketClient {
       );
     }
     return slug;
+  }
+
+  // ─── Identity ───────────────────────────────────────────────
+
+  /**
+   * Fetch the account the API token authenticates as. Cached for the process
+   * lifetime — used to enforce that we only delete our own comments.
+   */
+  async getCurrentUser(): Promise<BitbucketUser> {
+    if (!this.currentUser) {
+      this.currentUser = await this.request<BitbucketUser>("GET", "/user");
+    }
+    return this.currentUser;
   }
 
   // ─── PR URL Parser ──────────────────────────────────────────
@@ -295,7 +344,8 @@ export class BitbucketClient {
   ): Promise<PullRequest[]> {
     const ws = this.resolveWorkspace(workspace);
     const slug = this.resolveRepoSlug(repoSlug);
-    const query = `?q=source.branch.name="${encodeURIComponent(branchName)}"`;
+    const filter = `source.branch.name="${branchName}"`;
+    const query = `?q=${encodeURIComponent(filter)}`;
     return this.fetchAllPages<PullRequest>(
       `/repositories/${ws}/${slug}/pullrequests${query}`
     );
@@ -310,10 +360,11 @@ export class BitbucketClient {
   ): Promise<string> {
     const ws = this.resolveWorkspace(workspace);
     const slug = this.resolveRepoSlug(repoSlug);
-    return this.request<string>(
+    const diff = await this.request<string>(
       "GET",
       `/repositories/${ws}/${slug}/pullrequests/${prId}/diff`
     );
+    return truncateText(diff);
   }
 
   async listPRChanges(
@@ -511,9 +562,10 @@ export class BitbucketClient {
   ): Promise<string> {
     const ws = this.resolveWorkspace(workspace);
     const slug = this.resolveRepoSlug(repoSlug);
-    return this.request<string>(
+    const content = await this.request<string>(
       "GET",
       `/repositories/${ws}/${slug}/src/${encodeURIComponent(commit)}/${filePath}`
     );
+    return truncateText(content);
   }
 }
