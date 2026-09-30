@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v2.0.0...v2.1.0) (2026-09-30)
+
+
+### Features
+
+* add get_review_activity tool ([10f435b](https://github.com/Adyel/bitbucket-code-review-mcp/commit/10f435b3c6f88474d5d36643b5482806b2cc3321))
+
+
+### Bug Fixes
+
+* respect Bitbucket pagelen limit on pullrequests list ([#5](https://github.com/Adyel/bitbucket-code-review-mcp/issues/5)) ([c64a3bd](https://github.com/Adyel/bitbucket-code-review-mcp/commit/c64a3bd737e5c174f61dea83fbd2666870de501c))
+
 ## [2.0.0](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v1.0.0...v2.0.0) (2026-07-08)
 
 
