@@ -7,6 +7,9 @@
 const BASE_URL = "https://api.bitbucket.org/2.0";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 1000;
+const DEFAULT_PAGELEN = 100;
+/** The /pullrequests list endpoint rejects pagelen > 50 with 400 "Invalid pagelen". */
+const PR_LIST_PAGELEN = 50;
 /** Cap for large text payloads (diffs, file content) to avoid flooding context. */
 const MAX_TEXT_CHARS = 1_000_000;
 
@@ -197,17 +200,17 @@ export class BitbucketClient {
   /**
    * Fetch all pages of a paginated endpoint, following `next` URLs.
    *
-   * Requests the maximum page size (100) to minimize round trips and
-   * tracks visited URLs to guard against infinite pagination loops.
+   * Requests `pagelen` items per page (the endpoint's max) to minimize round
+   * trips and tracks visited URLs to guard against infinite pagination loops.
    */
-  private async fetchAllPages<T>(path: string): Promise<T[]> {
-    const MAX_PAGES = 200; // safety limit — 200 × 100 = 20 000 items
+  private async fetchAllPages<T>(path: string, pagelen = DEFAULT_PAGELEN): Promise<T[]> {
+    const MAX_PAGES = 200;
     const allValues: T[] = [];
     const seenUrls = new Set<string>();
 
-    // Append pagelen=100 (Bitbucket max) to the initial request
     const separator = path.includes("?") ? "&" : "?";
-    let currentUrl: string | undefined = `${BASE_URL}${path}${separator}pagelen=100`;
+    let currentUrl: string | undefined =
+      `${BASE_URL}${path}${separator}pagelen=${pagelen}`;
 
     let pageCount = 0;
 
@@ -318,7 +321,8 @@ export class BitbucketClient {
     const slug = this.resolveRepoSlug(repoSlug);
     const query = state ? `?state=${encodeURIComponent(state)}` : "";
     return this.fetchAllPages<PullRequest>(
-      `/repositories/${ws}/${slug}/pullrequests${query}`
+      `/repositories/${ws}/${slug}/pullrequests${query}`,
+      PR_LIST_PAGELEN
     );
   }
 
@@ -345,7 +349,8 @@ export class BitbucketClient {
     const filter = `source.branch.name="${branchName}"`;
     const query = `?q=${encodeURIComponent(filter)}`;
     return this.fetchAllPages<PullRequest>(
-      `/repositories/${ws}/${slug}/pullrequests${query}`
+      `/repositories/${ws}/${slug}/pullrequests${query}`,
+      PR_LIST_PAGELEN
     );
   }
 

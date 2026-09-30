@@ -2,8 +2,9 @@
  * Unit tests for bitbucket-client.ts — pure function tests.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { BitbucketClient, truncateText } from "../src/bitbucket-client.js";
+import { jsonResponse, stubFetch } from "./helpers/mock-fetch.js";
 
 describe("BitbucketClient", () => {
   const client = new BitbucketClient({
@@ -89,6 +90,48 @@ describe("BitbucketClient", () => {
       expect(result).toContain("abcd");
       expect(result).toContain("truncated");
       expect(result).toContain("of 10 characters");
+    });
+  });
+
+  describe("pagination", () => {
+    const paged = new BitbucketClient({
+      email: "test@example.com",
+      apiToken: "test-token",
+      defaultWorkspace: "ws",
+      defaultRepoSlug: "repo",
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("requests pagelen=50 on the pullrequests list endpoint", async () => {
+      const fetchMock = stubFetch(() => jsonResponse({ values: [] }));
+      await paged.listPullRequests(undefined, undefined, "OPEN");
+      await paged.getPullRequestByBranch("feature/x");
+      expect(fetchMock.mock.calls[0][0]).toContain("/pullrequests?state=OPEN&pagelen=50");
+      expect(fetchMock.mock.calls[1][0]).toMatch(/\/pullrequests\?q=.*&pagelen=50$/);
+    });
+
+    it("keeps pagelen=100 on PR sub-resources", async () => {
+      const fetchMock = stubFetch(() => jsonResponse({ values: [] }));
+      await paged.listPRComments(1);
+      expect(fetchMock.mock.calls[0][0]).toContain(
+        "/pullrequests/1/comments?pagelen=100"
+      );
+    });
+
+    it("follows next links until exhausted", async () => {
+      const next =
+        "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests?page=2";
+      const fetchMock = stubFetch((url) =>
+        url === next
+          ? jsonResponse({ values: [{ id: 2 }] })
+          : jsonResponse({ values: [{ id: 1 }], next })
+      );
+      const prs = await paged.listPullRequests();
+      expect(prs.map((pr) => pr.id)).toEqual([1, 2]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 });
