@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { SINCE_PATTERN } from "../bitbucket-client.js";
 import type { BitbucketClient, PullRequest } from "../bitbucket-client.js";
 import { WorkspaceSchema, RepoSlugSchema } from "../schemas/shared.js";
 import {
@@ -193,5 +194,74 @@ export function registerPRDiscovery(server: McpServer, client: BitbucketClient):
       );
       return toolTextResponse(content);
     })
+  );
+
+  server.registerTool(
+    "get_review_activity",
+    {
+      description:
+        "Find pull requests in one repository that a user authored, reviewed, approved, requested changes on, or commented on. Returns PRs updated on or after `since`, newest first, with the user's own comments.",
+      annotations: { title: "Get review activity", readOnlyHint: true },
+      inputSchema: {
+        workspace: WorkspaceSchema,
+        repo_slug: RepoSlugSchema,
+        since: z
+          .string()
+          .regex(SINCE_PATTERN, "Use YYYY-MM-DD or an ISO-8601 datetime")
+          .optional()
+          .describe(
+            "Only PRs updated (and comments created) on or after this date, e.g. '2026-09-14' or '2026-09-14T09:00:00Z'. Omit to scan from the newest PR back."
+          ),
+        state: z
+          .enum(["OPEN", "MERGED", "DECLINED", "ALL"])
+          .optional()
+          .describe("PR state filter. Defaults to ALL (OPEN, MERGED and DECLINED)."),
+        account_id: z
+          .string()
+          .optional()
+          .describe(
+            "Bitbucket account ID to report on. Defaults to BITBUCKET_ACCOUNT_ID, then the token's own account."
+          ),
+        include_comments: z
+          .boolean()
+          .optional()
+          .describe(
+            "Fetch the user's comments on each matched PR (one extra request per PR). Defaults to true."
+          ),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(100)
+          .optional()
+          .describe("Maximum number of pull requests to return. Defaults to 25."),
+      },
+    },
+    withErrorHandling(
+      async ({
+        workspace,
+        repo_slug,
+        since,
+        state,
+        account_id,
+        include_comments,
+        limit,
+      }) => {
+        const result = await client.getReviewActivity({
+          workspace,
+          repoSlug: repo_slug,
+          since,
+          state,
+          accountId: account_id,
+          includeComments: include_comments,
+          limit,
+        });
+        return toolResponse({
+          ...result,
+          since: since ?? null,
+          count: result.reviews.length,
+        });
+      }
+    )
   );
 }

@@ -13,3 +13,7 @@ export function stubFetch(handler: (url: string) => Response | Promise<Response>
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
+
+export function requestedUrls(fetchMock: ReturnType<typeof stubFetch>): string[] {
+  return fetchMock.mock.calls.map(([url]) => decodeURIComponent(url));
+}
