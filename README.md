@@ -9,6 +9,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 | Category | Tools |
 |----------|-------|
 | **PR Discovery** | One `get_pull_request` (by ID, branch, or URL), list PRs, view diff, list changed files, read file content |
+| **Review Activity** | `get_review_activity` — PRs you authored, reviewed, approved or commented on since a date |
 | **Comments** | One `add_comment` for general / inline / file-level / reply, plus batch `add_comments` |
 | **Code Suggestions** | Single and multi-line suggestions with Bitbucket's suggestion syntax — one-click apply |
 | **Comment Management** | Edit (clean replace or append), delete (own comments only), resolve/reopen via one toggle |
@@ -60,6 +61,11 @@ export BITBUCKET_API_TOKEN="your-api-token"
 #   → BITBUCKET_DEFAULT_REPO_SLUG=backend-api
 export BITBUCKET_DEFAULT_WORKSPACE="your-workspace"
 export BITBUCKET_DEFAULT_REPO_SLUG="your-repo"
+
+# Optional: your Bitbucket account ID, used by get_review_activity.
+# Needed when the API token lacks the read:user:bitbucket scope (GET /user).
+# Find it in any PR's API JSON under author.account_id / participants[].user.account_id.
+export BITBUCKET_ACCOUNT_ID="your-account-id"
 
 # Optional: customize the AI review tag (default: 🤖 AI Review)
 # Set to empty string to disable tagging entirely: BITBUCKET_AI_TAG=""
@@ -127,6 +133,7 @@ Add to `~/.gemini/settings.json`:
 | `get_pull_request_diff` | Get full diff text (large diffs truncated with a note) |
 | `list_pull_request_files` | List changed files with add/remove counts |
 | `get_file_content` | Read file content at a specific commit/branch/tag |
+| `get_review_activity` | PRs an account authored, reviewed, approved or commented on, newest first — filter by `since` and `state`, with the account's own comments |
 
 ### Code Review Comments
 
