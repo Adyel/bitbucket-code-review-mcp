@@ -5,10 +5,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { BitbucketClient, PullRequest } from "../bitbucket-client.js";
-import {
-  WorkspaceSchema,
-  RepoSlugSchema,
-} from "../schemas/shared.js";
+import { WorkspaceSchema, RepoSlugSchema } from "../schemas/shared.js";
 import {
   toolResponse,
   toolTextResponse,
@@ -47,10 +44,7 @@ function detailPR(pr: PullRequest) {
   };
 }
 
-export function registerPRDiscovery(
-  server: McpServer,
-  client: BitbucketClient
-): void {
+export function registerPRDiscovery(server: McpServer, client: BitbucketClient): void {
   server.registerTool(
     "list_pull_requests",
     {
@@ -67,11 +61,7 @@ export function registerPRDiscovery(
       },
     },
     withErrorHandling(async ({ workspace, repo_slug, state }) => {
-      const prs = await client.listPullRequests(
-        workspace,
-        repo_slug,
-        state || "OPEN"
-      );
+      const prs = await client.listPullRequests(workspace, repo_slug, state || "OPEN");
       return toolResponse({ pull_requests: prs.map(summarizePR) });
     })
   );
@@ -109,11 +99,7 @@ export function registerPRDiscovery(
     withErrorHandling(async ({ workspace, repo_slug, pr_id, branch, url }) => {
       if (url) {
         const ref = client.parsePullRequestUrl(url);
-        const pr = await client.getPullRequest(
-          ref.prId,
-          ref.workspace,
-          ref.repoSlug
-        );
+        const pr = await client.getPullRequest(ref.prId, ref.workspace, ref.repoSlug);
         return toolResponse({
           ...detailPR(pr),
           workspace: ref.workspace,
@@ -127,15 +113,9 @@ export function registerPRDiscovery(
       }
 
       if (branch) {
-        const prs = await client.getPullRequestByBranch(
-          branch,
-          workspace,
-          repo_slug
-        );
+        const prs = await client.getPullRequestByBranch(branch, workspace, repo_slug);
         if (prs.length === 0) {
-          return toolTextResponse(
-            `No pull requests found for branch "${branch}".`
-          );
+          return toolTextResponse(`No pull requests found for branch "${branch}".`);
         }
         return toolResponse({ pull_requests: prs.map(summarizePR) });
       }
@@ -198,9 +178,7 @@ export function registerPRDiscovery(
         repo_slug: RepoSlugSchema,
         commit: z
           .string()
-          .describe(
-            "The commit hash, branch name, or tag to read the file from."
-          ),
+          .describe("The commit hash, branch name, or tag to read the file from."),
         file_path: z
           .string()
           .describe("File path relative to repo root, e.g. src/utils.ts"),

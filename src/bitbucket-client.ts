@@ -52,7 +52,7 @@ export interface PRReference {
 
 export interface InlinePosition {
   path: string;
-  to?: number;   // line in new file
+  to?: number; // line in new file
   from?: number; // line in old file (for deleted lines)
 }
 
@@ -122,9 +122,9 @@ export class BitbucketClient {
 
   constructor(config: BitbucketConfig) {
     this.config = config;
-    this.authHeader = `Basic ${Buffer.from(
-      `${config.email}:${config.apiToken}`
-    ).toString("base64")}`;
+    this.authHeader = `Basic ${Buffer.from(`${config.email}:${config.apiToken}`).toString(
+      "base64"
+    )}`;
   }
 
   private async request<T>(
@@ -132,9 +132,7 @@ export class BitbucketClient {
     pathOrUrl: string,
     body?: unknown
   ): Promise<T> {
-    const url = pathOrUrl.startsWith("http")
-      ? pathOrUrl
-      : `${BASE_URL}${pathOrUrl}`;
+    const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${BASE_URL}${pathOrUrl}`;
     const headers: Record<string, string> = {
       Authorization: this.authHeader,
       "Content-Type": "application/json",
@@ -156,10 +154,7 @@ export class BitbucketClient {
       });
 
       // Retry on 429 (rate limit) or 5xx (server error)
-      if (
-        (response.status === 429 || response.status >= 500) &&
-        attempt < MAX_RETRIES
-      ) {
+      if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
         const retryAfter = response.headers.get("retry-after");
         if (retryAfter) {
           const waitMs = parseInt(retryAfter, 10) * 1000;
@@ -233,7 +228,10 @@ export class BitbucketClient {
         break;
       }
 
-      const page: PaginatedResponse<T> = await this.request<PaginatedResponse<T>>("GET", currentUrl);
+      const page: PaginatedResponse<T> = await this.request<PaginatedResponse<T>>(
+        "GET",
+        currentUrl
+      );
 
       if (Array.isArray(page.values)) {
         allValues.push(...page.values);
