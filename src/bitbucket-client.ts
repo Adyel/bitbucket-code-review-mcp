@@ -10,8 +10,15 @@ const INITIAL_BACKOFF_MS = 1000;
 const DEFAULT_PAGELEN = 100;
 /** The /pullrequests list endpoint rejects pagelen > 50 with 400 "Invalid pagelen". */
 const PR_LIST_PAGELEN = 50;
+const ACTIVITY_MAX_PAGES = 10;
+const ACTIVITY_COMMENT_CONCURRENCY = 4;
+
 /** Cap for large text payloads (diffs, file content) to avoid flooding context. */
 const MAX_TEXT_CHARS = 1_000_000;
+
+/** YYYY-MM-DD with an optional ISO-8601 time; also keeps BBQL free of injected syntax. */
+export const SINCE_PATTERN =
+  /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
 
 /**
  * Error carrying the HTTP status of a failed Bitbucket API call so callers can
@@ -38,6 +45,7 @@ export interface BitbucketConfig {
   apiToken: string;
   defaultWorkspace?: string;
   defaultRepoSlug?: string;
+  defaultAccountId?: string;
   pendingComments?: boolean;
 }
 
@@ -66,10 +74,18 @@ export interface PullRequest {
   title: string;
   description: string;
   state: string;
-  author: { display_name: string; uuid: string };
+  author: { display_name: string; uuid: string; account_id?: string };
   source: { branch: { name: string }; repository?: { full_name: string } };
   destination: { branch: { name: string }; repository?: { full_name: string } };
-  reviewers: Array<{ display_name: string; uuid: string }>;
+  reviewers: Array<{ display_name: string; uuid: string; account_id?: string }>;
+  /** Absent on list responses unless requested with `fields=+values.participants`. */
+  participants?: Array<{
+    role: "PARTICIPANT" | "REVIEWER";
+    approved: boolean;
+    state?: "approved" | "changes_requested" | null;
+    participated_on?: string | null;
+    user: { display_name: string; uuid: string; account_id?: string };
+  }>;
   created_on: string;
   updated_on: string;
   links: { html: { href: string } };
@@ -80,7 +96,7 @@ export interface PRComment {
   content: { raw: string; markup: string; html: string };
   inline?: { path: string; from?: number; to?: number };
   parent?: { id: number };
-  user: { display_name: string; uuid: string };
+  user: { display_name: string; uuid: string; account_id?: string };
   created_on: string;
   updated_on: string;
   deleted: boolean;
@@ -107,6 +123,50 @@ export interface DiffStatEntry {
   lines_removed: number;
 }
 
+export type ReviewAction =
+  | "Approved"
+  | "Changes Requested"
+  | "Commented"
+  | "Author"
+  | "Pending Review"
+  | "Not Reviewed"
+  | "Participated";
+
+export interface ReviewActivityItem {
+  id: number;
+  title: string;
+  state: string;
+  author: string;
+  url: string;
+  updated_on: string;
+  is_author: boolean;
+  is_reviewer: boolean;
+  approved: boolean;
+  review_state: "approved" | "changes_requested" | null;
+  participated_on: string | null;
+  summary_action: ReviewAction;
+  my_comments?: Array<{ id: number; created_on: string; text: string }>;
+  comments_error?: string;
+}
+
+export interface ReviewActivityOptions {
+  workspace?: string;
+  repoSlug?: string;
+  accountId?: string;
+  since?: string;
+  state?: "OPEN" | "MERGED" | "DECLINED" | "ALL";
+  limit?: number;
+  includeComments?: boolean;
+}
+
+export interface ReviewActivityResult {
+  account_id: string;
+  reviews: ReviewActivityItem[];
+  scanned_pull_requests: number;
+  /** True when the page cap stopped the scan before the matching PRs ran out. */
+  incomplete: boolean;
+}
+
 export interface PaginatedResponse<T> {
   size: number;
   page: number;
@@ -114,6 +174,64 @@ export interface PaginatedResponse<T> {
   next?: string;
   previous?: string;
   values: T[];
+}
+
+function bbqlString(value: string): string {
+  return `"${value.replace(/["\\]/g, "\\$&")}"`;
+}
+
+async function mapWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (next < items.length) {
+        await fn(items[next++]);
+      }
+    }
+  );
+  await Promise.all(workers);
+}
+
+function toActivityItem(
+  pr: PullRequest,
+  accountId: string
+): ReviewActivityItem | undefined {
+  const participant = pr.participants?.find((p) => p.user?.account_id === accountId);
+  const isAuthor = pr.author?.account_id === accountId;
+  const isReviewer =
+    participant?.role === "REVIEWER" ||
+    (pr.reviewers ?? []).some((r) => r.account_id === accountId);
+  if (!isAuthor && !isReviewer && !participant) return undefined;
+
+  const approved = participant?.approved ?? false;
+  const reviewState = participant?.state ?? null;
+  let summaryAction: ReviewAction;
+  if (approved) summaryAction = "Approved";
+  else if (reviewState === "changes_requested") summaryAction = "Changes Requested";
+  else if (isAuthor) summaryAction = "Author";
+  else if (isReviewer && !participant?.participated_on)
+    summaryAction = pr.state === "OPEN" ? "Pending Review" : "Not Reviewed";
+  else summaryAction = "Participated";
+
+  return {
+    id: pr.id,
+    title: pr.title,
+    state: pr.state,
+    author: pr.author.display_name,
+    url: pr.links.html.href,
+    updated_on: pr.updated_on,
+    is_author: isAuthor,
+    is_reviewer: isReviewer,
+    approved,
+    review_state: reviewState,
+    participated_on: participant?.participated_on ?? null,
+    summary_action: summaryAction,
+  };
 }
 
 // ─── Client ──────────────────────────────────────────────────────
@@ -203,7 +321,11 @@ export class BitbucketClient {
    * Requests `pagelen` items per page (the endpoint's max) to minimize round
    * trips and tracks visited URLs to guard against infinite pagination loops.
    */
-  private async fetchAllPages<T>(path: string, pagelen = DEFAULT_PAGELEN): Promise<T[]> {
+  private async fetchAllPages<T>(
+    path: string,
+    pagelen = DEFAULT_PAGELEN,
+    isDone?: (values: T[], pageCount: number) => boolean
+  ): Promise<T[]> {
     const MAX_PAGES = 200;
     const allValues: T[] = [];
     const seenUrls = new Set<string>();
@@ -239,6 +361,8 @@ export class BitbucketClient {
       if (Array.isArray(page.values)) {
         allValues.push(...page.values);
       }
+
+      if (page.next && isDone?.(allValues, pageCount)) break;
 
       // `next` is either a full URL for the next page or absent / undefined
       currentUrl = page.next;
@@ -352,6 +476,120 @@ export class BitbucketClient {
       `/repositories/${ws}/${slug}/pullrequests${query}`,
       PR_LIST_PAGELEN
     );
+  }
+
+  // ─── Review Activity ────────────────────────────────────────
+
+  private async resolveAccountId(accountId?: string): Promise<string> {
+    const explicit = accountId || this.config.defaultAccountId;
+    if (explicit) return explicit;
+    try {
+      const me = await this.getCurrentUser();
+      if (me.account_id) return me.account_id;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Could not determine the Bitbucket account (GET /user failed: ${reason}). Pass account_id or set BITBUCKET_ACCOUNT_ID.`,
+        { cause: error }
+      );
+    }
+    throw new Error(
+      "Could not determine the Bitbucket account. Pass account_id or set BITBUCKET_ACCOUNT_ID."
+    );
+  }
+
+  /**
+   * PRs updated on or after `since` in which the account is the author, a
+   * reviewer or a participant, newest first.
+   */
+  async getReviewActivity(
+    options: ReviewActivityOptions = {}
+  ): Promise<ReviewActivityResult> {
+    const ws = this.resolveWorkspace(options.workspace);
+    const slug = this.resolveRepoSlug(options.repoSlug);
+    const { since } = options;
+    if (since && !SINCE_PATTERN.test(since)) {
+      throw new Error(
+        `Invalid since "${since}". Use YYYY-MM-DD or an ISO-8601 datetime.`
+      );
+    }
+    const accountId = await this.resolveAccountId(options.accountId);
+    const limit = options.limit ?? 25;
+    const states =
+      !options.state || options.state === "ALL"
+        ? ["OPEN", "MERGED", "DECLINED"]
+        : [options.state];
+
+    const params = [
+      ...states.map((st) => `state=${st}`),
+      "sort=-updated_on",
+      `fields=${encodeURIComponent("+values.participants,+values.reviewers")}`,
+    ];
+    if (since) params.push(`q=${encodeURIComponent(`updated_on >= ${since}`)}`);
+
+    let stoppedAtCap = false;
+    const prs = await this.fetchAllPages<PullRequest>(
+      `/repositories/${ws}/${slug}/pullrequests?${params.join("&")}`,
+      PR_LIST_PAGELEN,
+      (values, pageCount) => {
+        if (values.filter((pr) => toActivityItem(pr, accountId)).length >= limit) {
+          return true;
+        }
+        stoppedAtCap = pageCount >= ACTIVITY_MAX_PAGES;
+        return stoppedAtCap;
+      }
+    );
+
+    const reviews = prs
+      .map((pr) => toActivityItem(pr, accountId))
+      .filter((item): item is ReviewActivityItem => item !== undefined)
+      .slice(0, limit);
+
+    if (options.includeComments !== false) {
+      await mapWithConcurrency(reviews, ACTIVITY_COMMENT_CONCURRENCY, async (item) => {
+        try {
+          const comments = await this.listCommentsBy(item.id, accountId, since, ws, slug);
+          item.my_comments = comments.map((c) => ({
+            id: c.id,
+            created_on: c.created_on,
+            text: truncateText(c.content.raw, 200),
+          }));
+          if (
+            item.my_comments.length > 0 &&
+            (item.summary_action === "Author" ||
+              item.summary_action === "Pending Review" ||
+              item.summary_action === "Not Reviewed" ||
+              item.summary_action === "Participated")
+          ) {
+            item.summary_action = "Commented";
+          }
+        } catch (error) {
+          item.comments_error = error instanceof Error ? error.message : String(error);
+        }
+      });
+    }
+
+    return {
+      account_id: accountId,
+      reviews,
+      scanned_pull_requests: prs.length,
+      incomplete: stoppedAtCap,
+    };
+  }
+
+  private async listCommentsBy(
+    prId: number,
+    accountId: string,
+    since: string | undefined,
+    ws: string,
+    slug: string
+  ): Promise<PRComment[]> {
+    let filter = `user.account_id = ${bbqlString(accountId)}`;
+    if (since) filter += ` AND created_on >= ${since}`;
+    const comments = await this.fetchAllPages<PRComment>(
+      `/repositories/${ws}/${slug}/pullrequests/${prId}/comments?q=${encodeURIComponent(filter)}`
+    );
+    return comments.filter((c) => !c.deleted);
   }
 
   // ─── Diff & Changes ──────────────────────────────────────────

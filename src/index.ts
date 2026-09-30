@@ -29,6 +29,7 @@ const EnvSchema = z.object({
     .min(1, "BITBUCKET_API_TOKEN cannot be empty"),
   BITBUCKET_DEFAULT_WORKSPACE: z.string().optional(),
   BITBUCKET_DEFAULT_REPO_SLUG: z.string().optional(),
+  BITBUCKET_ACCOUNT_ID: z.string().optional(),
   BITBUCKET_AI_TAG: z.string().optional(),
   BITBUCKET_COMMENTS_PENDING: z
     .enum(["true", "false"])
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
     apiToken: env.BITBUCKET_API_TOKEN,
     defaultWorkspace: env.BITBUCKET_DEFAULT_WORKSPACE,
     defaultRepoSlug: env.BITBUCKET_DEFAULT_REPO_SLUG,
+    defaultAccountId: env.BITBUCKET_ACCOUNT_ID,
     pendingComments: env.BITBUCKET_COMMENTS_PENDING ?? false,
   });
 
