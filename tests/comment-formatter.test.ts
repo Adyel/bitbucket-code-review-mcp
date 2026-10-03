@@ -92,6 +92,23 @@ describe("comment-formatter", () => {
       const result = formatCodeSuggestion("const x = 1;", "Use const");
       expect(result).toContain("Use const");
     });
+
+    it("adds no label of its own, so an empty tag leaves only the explanation and the block", () => {
+      process.env.BITBUCKET_AI_TAG = "";
+      expect(formatCodeSuggestion("const x = 1;", "Use const")).toBe(
+        "Use const\n\n```suggestion\nconst x = 1;\n```"
+      );
+      expect(formatCodeSuggestion("const x = 1;")).toBe(
+        "```suggestion\nconst x = 1;\n```"
+      );
+    });
+
+    it("carries the AI tag like any other comment when it is set", () => {
+      process.env.BITBUCKET_AI_TAG = "AI";
+      const result = formatCodeSuggestion("const x = 1;", "Use const");
+      expect(result.startsWith("**[AI]**\n\nUse const")).toBe(true);
+      expect(result).not.toContain("Suggestion");
+    });
   });
 
   // ─── formatUpdatedComment ─────────────────────────────────

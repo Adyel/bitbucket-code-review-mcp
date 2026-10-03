@@ -205,10 +205,11 @@ All comments are auto-tagged with the configurable `[🤖 AI Review]` prefix:
 Use optional chaining for safer property access.
 ```
 
-Code suggestions use Bitbucket's native syntax and render an **Apply** button:
+Code suggestions use Bitbucket's native syntax and render an **Apply** button.
+They carry the AI tag like any other comment and no label of their own:
 
 ````
-[🤖 AI Review] 💡 Suggestion
+[🤖 AI Review]
 Use optional chaining here
 
 ```suggestion
