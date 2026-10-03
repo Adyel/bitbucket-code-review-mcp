@@ -54,13 +54,11 @@ export function formatCodeSuggestion(
   suggestedCode: string,
   explanation?: string
 ): string {
-  const parts: string[] = [tagPrefix(`💡 **Suggestion**`).trimEnd()];
-
-  if (explanation) {
-    parts.push("", explanation);
-  }
-
-  parts.push("", "```suggestion", suggestedCode, "```");
+  const parts: string[] = [];
+  const tag = tagPrefix().trimEnd();
+  if (tag) parts.push(tag, "");
+  if (explanation) parts.push(explanation, "");
+  parts.push("```suggestion", suggestedCode, "```");
 
   return parts.join("\n");
 }
