@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v2.1.0...v2.1.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* drop the Suggestion label from code suggestions ([#8](https://github.com/Adyel/bitbucket-code-review-mcp/issues/8)) ([773cef6](https://github.com/Adyel/bitbucket-code-review-mcp/commit/773cef643cc562d828eda94d528eb69634828c2a))
+
 ## [2.1.0](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v2.0.0...v2.1.0) (2026-09-30)
 
 
