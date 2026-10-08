@@ -23,7 +23,7 @@ import {
 } from "../comment-formatter.js";
 
 /**
- * Build the inline position for a comment from its optional location fields.
+ * Build the inline position for a comment from its optional location fields, all lines of the new file.
  * Returns undefined for a general (PR-level) comment.
  */
 export function buildInlinePosition(
@@ -33,14 +33,14 @@ export function buildInlinePosition(
 ): InlinePosition | undefined {
   if (!filePath) return undefined;
   const inline: InlinePosition = { path: filePath };
-  if (line !== undefined) {
-    if (endLine !== undefined) {
-      inline.from = line;
-      inline.to = endLine;
-    } else {
-      inline.to = line;
-    }
+  if (line === undefined) return inline;
+  if (endLine !== undefined && endLine < line) {
+    throw new Error(`end_line (${endLine}) is before line (${line}).`);
   }
+  if (endLine !== undefined && endLine > line) {
+    inline.start_to = line;
+  }
+  inline.to = endLine ?? line;
   return inline;
 }
 
@@ -334,6 +334,7 @@ export function registerComments(
                 file: c.inline.path,
                 line_from: c.inline.from,
                 line_to: c.inline.to,
+                line_start: c.inline.start_to,
               }
             : null,
           parent_id: c.parent?.id ?? null,
