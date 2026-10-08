@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v2.1.1...v2.1.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* anchor multi-line comments to new-file lines ([#10](https://github.com/Adyel/bitbucket-code-review-mcp/issues/10)) ([509d25a](https://github.com/Adyel/bitbucket-code-review-mcp/commit/509d25a4a4f432ef31d2fb1e8e0fb152e96665f8))
+
 ## [2.1.1](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v2.1.0...v2.1.1) (2026-10-03)
 
 
