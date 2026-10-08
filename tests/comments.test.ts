@@ -21,11 +21,22 @@ describe("buildInlinePosition", () => {
     });
   });
 
-  it("returns a multi-line inline position (from..to)", () => {
+  it("anchors a multi-line range to new-file lines start_to..to, never to the old file's from", () => {
     expect(buildInlinePosition("src/a.ts", 12, 15)).toEqual({
       path: "src/a.ts",
-      from: 12,
+      start_to: 12,
       to: 15,
     });
+  });
+
+  it("treats a range of one line as a single-line anchor", () => {
+    expect(buildInlinePosition("src/a.ts", 12, 12)).toEqual({
+      path: "src/a.ts",
+      to: 12,
+    });
+  });
+
+  it("refuses a range that ends before it starts", () => {
+    expect(() => buildInlinePosition("src/a.ts", 15, 12)).toThrow(/before line/);
   });
 });

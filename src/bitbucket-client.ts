@@ -61,10 +61,14 @@ export interface PRReference {
   prId: number;
 }
 
+// Bitbucket keeps the two file versions apart: `to` and `start_to` are lines in the new file, `from` and
+// `start_from` in the old one. A range is `start_*` to its last line; `from` is never the start of a new-file range.
 export interface InlinePosition {
   path: string;
-  to?: number; // line in new file
-  from?: number; // line in old file (for deleted lines)
+  to?: number;
+  from?: number;
+  start_to?: number;
+  start_from?: number;
 }
 
 // ─── Response Types ──────────────────────────────────────────────
@@ -94,7 +98,7 @@ export interface PullRequest {
 export interface PRComment {
   id: number;
   content: { raw: string; markup: string; html: string };
-  inline?: { path: string; from?: number; to?: number };
+  inline?: InlinePosition;
   parent?: { id: number };
   user: { display_name: string; uuid: string; account_id?: string };
   created_on: string;
