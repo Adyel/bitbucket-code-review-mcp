@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v2.1.2...v2.2.0) (2026-10-11)
+
+
+### Features
+
+* add an optional footer after a suggestion block ([#12](https://github.com/Adyel/bitbucket-code-review-mcp/issues/12)) ([a05ecbc](https://github.com/Adyel/bitbucket-code-review-mcp/commit/a05ecbc731a706e6a5d16cea1e2ef0ae218a6a42))
+
 ## [2.1.2](https://github.com/Adyel/bitbucket-code-review-mcp/compare/v2.1.1...v2.1.2) (2026-10-08)
 
 
