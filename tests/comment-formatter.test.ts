@@ -103,6 +103,13 @@ describe("comment-formatter", () => {
       );
     });
 
+    it("puts the footer after the suggestion block", () => {
+      process.env.BITBUCKET_AI_TAG = "";
+      expect(formatCodeSuggestion("const x = 1;", "Use const", "[Reviewed with X 1.0]")).toBe(
+        "Use const\n\n```suggestion\nconst x = 1;\n```\n\n[Reviewed with X 1.0]"
+      );
+    });
+
     it("carries the AI tag like any other comment when it is set", () => {
       process.env.BITBUCKET_AI_TAG = "AI";
       const result = formatCodeSuggestion("const x = 1;", "Use const");

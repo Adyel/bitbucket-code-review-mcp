@@ -146,6 +146,10 @@ export function registerComments(
           .string()
           .optional()
           .describe("Optional explanation of why this change is suggested."),
+        footer: z
+          .string()
+          .optional()
+          .describe("Optional text placed after the suggestion block, such as a signature line."),
       },
     },
     withErrorHandling(
@@ -158,10 +162,11 @@ export function registerComments(
         end_line,
         suggested_code,
         explanation,
+        footer,
       }) => {
         const result = await client.createPRComment(
           pr_id,
-          formatCodeSuggestion(suggested_code, explanation),
+          formatCodeSuggestion(suggested_code, explanation, footer),
           buildInlinePosition(file_path, line, end_line),
           undefined,
           workspace,
