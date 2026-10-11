@@ -52,13 +52,15 @@ export function formatComment(comment: string): string {
  */
 export function formatCodeSuggestion(
   suggestedCode: string,
-  explanation?: string
+  explanation?: string,
+  footer?: string
 ): string {
   const parts: string[] = [];
   const tag = tagPrefix().trimEnd();
   if (tag) parts.push(tag, "");
   if (explanation) parts.push(explanation, "");
   parts.push("```suggestion", suggestedCode, "```");
+  if (footer) parts.push("", footer);
 
   return parts.join("\n");
 }

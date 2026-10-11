@@ -140,7 +140,7 @@ Add to `~/.gemini/settings.json`:
 | Tool | Description |
 |------|-------------|
 | `add_comment` | Add a comment — general (no `file_path`), inline (`file_path`+`line`), file-level (`file_path` only), or reply (`parent_id`) |
-| `add_suggestion` | Post a code suggestion with optional `end_line` for multi-line spans |
+| `add_suggestion` | Post a code suggestion with optional `end_line` for multi-line spans, and an optional `footer` after the block |
 | `add_comments` | Batch-post many comments (each routed like `add_comment`) |
 | `update_comment` | Edit a comment — clean replace by default; `append=true` to append, `mark=true` for an `[Updated by AI]` marker |
 | `delete_comment` | Delete a comment authored by this integration's own account |
